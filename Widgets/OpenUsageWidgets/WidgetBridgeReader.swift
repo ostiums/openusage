@@ -58,12 +58,6 @@ enum WidgetBridgeReader {
             return WidgetBridgeReadResult(status: .corrupt, document: nil)
         }
     }
-
-    static func enabledProviderIDs() -> Set<String> {
-        let result = load()
-        guard case .loaded = result.status else { return [] }
-        return Set(result.document?.providers.filter(\.isEnabled).map(\.id) ?? [])
-    }
 }
 
 private extension WidgetProviderContent {
@@ -71,6 +65,7 @@ private extension WidgetProviderContent {
         self.init(
             id: record.id,
             displayName: record.displayName,
+            iconID: record.iconID ?? record.id,
             isEnabled: record.isEnabled,
             plan: record.plan,
             refreshedAt: record.refreshedAt,

@@ -1,6 +1,7 @@
 import Foundation
+import OpenUsageWidgetSupport
 
-struct WidgetProviderContent: Hashable, Sendable {
+struct WidgetProviderContent: Hashable, Sendable, WidgetSelectableProvider {
     enum Health: String, Hashable, Sendable {
         case ready
         case warning
@@ -10,6 +11,7 @@ struct WidgetProviderContent: Hashable, Sendable {
 
     let id: String
     let displayName: String
+    let iconID: String
     let isEnabled: Bool
     let plan: String?
     let refreshedAt: Date?

@@ -41,6 +41,21 @@ final class WidgetBridgeFileStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.read())
     }
 
+    func testReadsFileWrittenBeforeIconIDExisted() throws {
+        let url = temporaryURL()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Data("""
+        {"schemaVersion":1,"generatedAt":"2026-09-01T00:00:00Z","providers":[{"id":"claude",\
+        "displayName":"Claude","isEnabled":true,"health":"ready","primaryMetrics":[],"secondaryMetrics":[]}]}
+        """.utf8).write(to: url)
+
+        let document = try XCTUnwrap(WidgetBridgeFileStore(fileURL: url).read())
+        XCTAssertEqual(document.providers.map(\.id), ["claude"])
+        XCTAssertNil(document.providers.first?.iconID)
+    }
+
     private func temporaryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("OpenUsageWidgetBridgeTests-\(UUID().uuidString)")
@@ -53,6 +68,7 @@ final class WidgetBridgeFileStoreTests: XCTestCase {
             providers: [WidgetProviderRecord(
                 id: "claude",
                 displayName: "Claude",
+                iconID: "claude",
                 isEnabled: true,
                 plan: "Pro",
                 refreshedAt: Date(timeIntervalSince1970: 50),
@@ -84,6 +100,13 @@ final class WidgetBridgeExporterTests: XCTestCase {
         XCTAssertEqual(provider.primaryMetrics.first?.resetAt, fixture.now.addingTimeInterval(3_600))
         XCTAssertNil(provider.primaryMetrics.first?.detail)
         XCTAssertFalse(provider.primaryMetrics.contains { $0.id == "test.trend" })
+    }
+
+    func testExportsIconIDSoAccountCardsKeepTheirProviderMark() throws {
+        let fixture = Fixture()
+        let provider = try XCTUnwrap(fixture.exporter.makeDocument().providers.first)
+        XCTAssertEqual(provider.id, "test")
+        XCTAssertEqual(provider.iconID, "codex")
     }
 
     func testExportsFailureWithoutRawErrorAndRetainsLastGoodRows() throws {

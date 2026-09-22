@@ -32,6 +32,9 @@ public struct WidgetBridgeDocument: Codable, Hashable, Sendable {
 public struct WidgetProviderRecord: Codable, Hashable, Sendable, Identifiable {
     public let id: String
     public let displayName: String
+    /// Provider-mark asset name. Account cards (a second Claude or Codex login) have their own `id`
+    /// but share their family's mark. Optional so files written before this field still decode.
+    public let iconID: String?
     public let isEnabled: Bool
     public let plan: String?
     public let refreshedAt: Date?
@@ -42,6 +45,7 @@ public struct WidgetProviderRecord: Codable, Hashable, Sendable, Identifiable {
     public init(
         id: String,
         displayName: String,
+        iconID: String?,
         isEnabled: Bool,
         plan: String?,
         refreshedAt: Date?,
@@ -51,6 +55,7 @@ public struct WidgetProviderRecord: Codable, Hashable, Sendable, Identifiable {
     ) {
         self.id = id
         self.displayName = displayName
+        self.iconID = iconID
         self.isEnabled = isEnabled
         self.plan = plan
         self.refreshedAt = refreshedAt

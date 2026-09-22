@@ -46,6 +46,7 @@ struct WidgetBridgeExporter {
         return WidgetProviderRecord(
             id: provider.id,
             displayName: provider.displayName,
+            iconID: provider.icon.providerID,
             isEnabled: enablement.isEnabled(provider.id),
             plan: snapshot?.plan,
             refreshedAt: snapshot?.refreshedAt,

@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import OpenUsageWidgetSupport
 import WidgetKit
 
 struct ProviderUsageEntry: TimelineEntry {
@@ -66,8 +67,7 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
     ) -> ProviderUsageEntry {
         let result = WidgetBridgeReader.load()
         let selectedID = configuration.provider?.id
-            ?? result.document?.providers.first(where: \.isEnabled)?.id
-            ?? WidgetProviderCatalog.all.first?.id
+            ?? result.document.flatMap { WidgetProviderSelection.defaultProviderID(in: $0.providers) }
 
         guard let selectedID else {
             return ProviderUsageEntry(date: date, state: .missingData, providerID: nil)
@@ -104,6 +104,7 @@ extension WidgetProviderContent {
     static let placeholder = WidgetProviderContent(
         id: "claude",
         displayName: "Claude",
+        iconID: "claude",
         isEnabled: true,
         plan: "Pro",
         refreshedAt: .now,

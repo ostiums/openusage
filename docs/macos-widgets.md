@@ -7,7 +7,8 @@ shows one provider; add more instances to keep several providers visible.
 
 1. Launch OpenUsage at least once so it can publish the first usage snapshot.
 2. Open the macOS widget gallery and add **Provider Usage**.
-3. Edit the widget to choose Claude, Codex, Cursor, or any other enabled provider.
+3. Edit the widget to choose a provider. The list suggests the providers you have on, and covers every
+   provider OpenUsage shows, including extra Claude or Codex accounts.
 4. Choose the small, medium, or large size.
 
 The widget follows the provider's enabled metrics and saved order in OpenUsage. Small and medium focus
@@ -27,6 +28,9 @@ keep OpenUsage running; **Launch at Login** is the easiest way to do that.
 When OpenUsage is closed, the widget keeps the last good values. It marks them **Outdated** after about
 30 minutes. A provider refresh failure also keeps the last good values and shows a generic warning;
 open the popover for the detailed error and recovery steps.
+
+If the chosen provider disappears from OpenUsage (for example, you sign out of a second account), the
+widget says **Provider Unavailable** instead of switching to a different provider.
 
 WidgetKit controls the exact moment a widget redraws, so a desktop widget can update later than the
 five-minute in-app refresh. OpenUsage requests a redraw when provider values change, while WidgetKit

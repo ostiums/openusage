@@ -1,4 +1,5 @@
 import AppIntents
+import OpenUsageWidgetSupport
 
 struct ProviderWidgetConfiguration: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Provider Usage"
@@ -28,35 +29,26 @@ struct WidgetProviderEntity: AppEntity, Identifiable, Hashable, Sendable {
 
 struct WidgetProviderEntityQuery: EntityQuery, EnumerableEntityQuery {
     func entities(for identifiers: [String]) async throws -> [WidgetProviderEntity] {
-        let requested = Set(identifiers)
-        return WidgetProviderCatalog.all.filter { requested.contains($0.id) }
+        WidgetProviderSelection.resolve(identifiers, in: Self.providers()).map {
+            WidgetProviderEntity(id: $0.id, name: $0.name)
+        }
     }
 
     func allEntities() async throws -> [WidgetProviderEntity] {
-        WidgetProviderCatalog.all
+        Self.providers().map(WidgetProviderEntity.init)
     }
 
     func suggestedEntities() async throws -> [WidgetProviderEntity] {
-        let enabledIDs = WidgetBridgeReader.enabledProviderIDs()
-        let enabled = WidgetProviderCatalog.all.filter { enabledIDs.contains($0.id) }
-        return enabled.isEmpty ? WidgetProviderCatalog.all : enabled
+        WidgetProviderSelection.suggested(in: Self.providers()).map(WidgetProviderEntity.init)
+    }
+
+    private static func providers() -> [WidgetProviderContent] {
+        WidgetBridgeReader.load().document?.providers ?? []
     }
 }
 
-enum WidgetProviderCatalog {
-    static let all: [WidgetProviderEntity] = [
-        .init(id: "claude", name: "Claude"),
-        .init(id: "codex", name: "Codex"),
-        .init(id: "cursor", name: "Cursor"),
-        .init(id: "antigravity", name: "Antigravity"),
-        .init(id: "copilot", name: "Copilot"),
-        .init(id: "devin", name: "Devin"),
-        .init(id: "grok", name: "Grok"),
-        .init(id: "openrouter", name: "OpenRouter"),
-        .init(id: "zai", name: "Z.ai"),
-    ]
-
-    static func entity(id: String) -> WidgetProviderEntity? {
-        all.first { $0.id == id }
+private extension WidgetProviderEntity {
+    init(_ provider: WidgetProviderContent) {
+        self.init(id: provider.id, name: provider.displayName)
     }
 }

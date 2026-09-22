@@ -123,7 +123,7 @@ private struct ProviderWidgetHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            ProviderIconView(providerID: provider.id)
+            ProviderIconView(iconID: provider.iconID)
                 .frame(width: 19, height: 19)
 
             if compact {

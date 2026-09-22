@@ -2,10 +2,10 @@ import AppKit
 import SwiftUI
 
 struct ProviderIconView: View {
-    let providerID: String
+    let iconID: String
 
     var body: some View {
-        if let image = ProviderIconLoader.image(for: providerID) {
+        if let image = ProviderIconLoader.image(for: iconID) {
             Image(nsImage: image)
                 .resizable()
                 .renderingMode(.template)
@@ -26,16 +26,16 @@ struct ProviderIconView: View {
 private enum ProviderIconLoader {
     private static var cache: [String: NSImage] = [:]
 
-    static func image(for providerID: String) -> NSImage? {
-        if let image = cache[providerID] { return image }
+    static func image(for iconID: String) -> NSImage? {
+        if let image = cache[iconID] { return image }
         let url = Bundle.main.url(
-            forResource: providerID,
+            forResource: iconID,
             withExtension: "svg",
             subdirectory: "ProviderIcons"
-        ) ?? Bundle.main.url(forResource: providerID, withExtension: "svg")
+        ) ?? Bundle.main.url(forResource: iconID, withExtension: "svg")
         guard let url, let image = NSImage(contentsOf: url) else { return nil }
         image.isTemplate = true
-        cache[providerID] = image
+        cache[iconID] = image
         return image
     }
 }
