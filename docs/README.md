@@ -12,7 +12,7 @@ What the app does and how it behaves. These pages describe **behavior, not visua
 - [iCloud Sync](icloud-sync.md) — how spend history is combined across Macs
 - [Model pricing](pricing.md) — how spend tiles price tokens, and where the rates come from
 - [Updates](updates.md) — automatic updates, manual checks, and the beta channel
-- [Privacy & usage data](privacy.md) — what anonymous data is shared, and how to turn it off
+- [Privacy & usage data](privacy.md) — daily activity, crash reports, and optional usage analytics
 
 ## Integrations
 
@@ -31,6 +31,7 @@ What each provider tracks, where its credentials come from, and what to do when 
 - [Cursor](providers/cursor.md)
 - [Devin](providers/devin.md)
 - [Grok](providers/grok.md)
+- [Ollama](providers/ollama.md)
 - [OpenCode](providers/opencode.md)
 - [OpenRouter](providers/openrouter.md)
 - [Z.ai](providers/zai.md)

@@ -2,53 +2,64 @@ import Foundation
 
 @MainActor
 final class CodexProvider: ProviderRuntime {
-    let provider = Provider(
-        id: "codex",
-        displayName: "Codex",
-        icon: .providerMark("codex"),
-        links: [
+    static func makeProvider(id: String = "codex", displayName: String = "Codex") -> Provider {
+        Provider(id: id, displayName: displayName, icon: .providerMark("codex"), links: [
             .init(label: "Status", url: "https://status.openai.com/"),
             .init(label: "Dashboard", url: "https://chatgpt.com/codex/settings/usage")
-        ]
-    )
+        ])
+    }
+
+    let provider: Provider
+    let allowsUnattributedHistory: Bool
+    var allowsCachedLocalHistory: Bool { allowsUnattributedHistory }
 
     let authStore: CodexAuthStore
     let usageClient: CodexUsageClient
     let logUsageScanner: CodexLogUsageScanner
+    let openCodeUsageScanner: OpenCodeCodexUsageScanner
     let now: @Sendable () -> Date
     let pricing: @Sendable () async -> ModelPricing
+    let fallbackModel: @MainActor () -> String?
 
     init(
+        provider: Provider = CodexProvider.makeProvider(),
         authStore: CodexAuthStore = CodexAuthStore(),
         usageClient: CodexUsageClient = CodexUsageClient(),
         logUsageScanner: CodexLogUsageScanner = CodexLogUsageScanner(),
+        openCodeUsageScanner: OpenCodeCodexUsageScanner = OpenCodeCodexUsageScanner(),
+        allowsUnattributedHistory: Bool = true,
         now: @escaping @Sendable () -> Date = Date.init,
-        pricing: @escaping @Sendable () async -> ModelPricing = { await ModelPricingStore.shared.current() }
+        pricing: @escaping @Sendable () async -> ModelPricing = { await ModelPricingStore.shared.current() },
+        fallbackModel: @escaping @MainActor () -> String? = { CodexFallbackModelSetting.current() }
     ) {
+        self.provider = provider
+        self.allowsUnattributedHistory = allowsUnattributedHistory
         self.authStore = authStore
         self.usageClient = usageClient
         self.logUsageScanner = logUsageScanner
+        self.openCodeUsageScanner = openCodeUsageScanner
         self.now = now
         self.pricing = pricing
+        self.fallbackModel = fallbackModel
     }
 
     var widgetDescriptors: [WidgetDescriptor] {
         [
-            .percent(id: "codex.session", provider: provider, title: "Session")
+            .percent(id: "\(provider.id).session", provider: provider, title: "Session")
                 .exportingLimit("session", unit: "percent"),
-            .percent(id: "codex.weekly", provider: provider, title: "Weekly")
+            .percent(id: "\(provider.id).weekly", provider: provider, title: "Weekly")
                 .exportingLimit("weekly", unit: "percent"),
             // Model-specific Spark limits (GPT-5.3-Codex-Spark), parsed from `additional_rate_limits`.
             // Declared right after Weekly so they group with the core rate-limit meters; seeded On
             // Demand (below the caret) and unpinned in `DefaultLayout`.
-            .percent(id: "codex.spark", provider: provider, title: "Spark")
+            .percent(id: "\(provider.id).spark", provider: provider, title: "Spark")
                 .exportingLimit("spark", unit: "percent"),
-            .percent(id: "codex.sparkWeekly", provider: provider, title: "Spark Weekly")
+            .percent(id: "\(provider.id).sparkWeekly", provider: provider, title: "Spark Weekly")
                 .exportingLimit("sparkWeekly", unit: "percent"),
-            .combined(id: "codex.credits", provider: provider, title: "Extra Usage", metricLabel: "Credits")
+            .combined(id: "\(provider.id).credits", provider: provider, title: "Extra Usage", metricLabel: "Credits")
                 .exportingLimit("credits", kind: .balance, unit: "credits", source: .value(kind: .count, label: "credits"))
                 .exportingLimit("creditValue", kind: .balance, unit: "usd", source: .value(kind: .dollars)),
-            .values(id: "codex.rateLimitResets", provider: provider, title: "Rate Limit Resets", metricLabel: "Rate Limit Resets", traySuffix: "resets", showsResetExpiries: true)
+            .values(id: "\(provider.id).rateLimitResets", provider: provider, title: "Rate Limit Resets", metricLabel: "Rate Limit Resets", traySuffix: "resets", showsResetExpiries: true)
                 .exportingLimit("rateLimitResets", kind: .balance, unit: "resets", source: .value(kind: .count, label: "available")),
             .usageTrend(provider: provider)
                 .exportingHistory(
@@ -72,6 +83,7 @@ final class CodexProvider: ProviderRuntime {
     }
 
     func refresh() async -> ProviderSnapshot {
+        if authStore.expectedIdentity != nil { return await refreshAccount() }
         let fileCandidates = authStore.loadAuthCandidates()
         var lastFallbackError: Error?
 
@@ -134,31 +146,53 @@ final class CodexProvider: ProviderRuntime {
             accessToken: currentToken,
             accountID: authState.auth.tokens?.accountID
         )
-        var mapped = try CodexUsageMapper.mapUsageResponse(response, resetCredits: resetCredits, now: now())
+        let mapped = try CodexUsageMapper.mapUsageResponse(response, resetCredits: resetCredits, now: now())
 
+        return await snapshot(mapped: mapped)
+    }
+
+    func snapshot(mapped initial: CodexMappedUsage) async -> ProviderSnapshot {
+        var mapped = initial
         // Local spend tiles, scanned natively from the Codex CLI's session rollouts and priced through
-        // the shared pricing store, merged with Codex usage that happened inside pi (attributed back
-        // here). Both scans run on their scanner actors, off the main actor.
+        // the shared pricing store, merged with Codex usage that happened inside pi or OpenCode. Those
+        // agents attribute their underlying Codex OAuth traffic back to this card.
         let pricing = await pricing()
-        let nativeScan = await logUsageScanner.scan(now: now(), pricing: pricing)
-        let piScan = await PiUsageScanner.shared.scan(cardID: provider.id, now: now(), pricing: pricing)
+        // Three independent local sources: reading rollout files, pi's JSONL, and OpenCode's SQLite
+        // concurrently keeps the slowest one — not their sum — on the refresh's critical path.
+        let selectedFallbackModel = fallbackModel()
+        async let native = logUsageScanner.scan(
+            now: now(), pricing: pricing, fallbackModel: selectedFallbackModel
+        )
+        async let pi = allowsUnattributedHistory ? PiUsageScanner.shared.scan(
+            cardID: provider.id, now: now(), pricing: pricing,
+            estimateCost: { CodexUsagePricing.estimatedCost(pricing: pricing, model: $0, tokens: $1) }
+        )
+            : nil
+        async let openCode = allowsUnattributedHistory
+            ? openCodeUsageScanner.scan(now: now(), pricing: pricing) : nil
+        let (nativeScan, piScan, openCodeScan) = await (native, pi, openCode)
         var usageHistory: ProviderUsageHistory?
-        if let scan = DailyUsageAccumulator.merged([nativeScan, piScan]) {
-            let note = piScan == nil
-                ? "From your Codex logs (estimated)"
-                : "From your Codex logs and pi (estimated)"
+        // Cancellation can land between the local scans. Treat them as one unit so a
+        // partial result cannot replace the last-good combined history in WidgetDataStore.
+        if !Task.isCancelled, let scan = DailyUsageAccumulator.merged([nativeScan, piScan, openCodeScan]) {
+            let baseNote = Self.localUsageSourceNote(hasPi: piScan != nil, hasOpenCode: openCodeScan != nil)
             usageHistory = ProviderUsageHistory(
                 series: scan.series,
                 modelUsage: scan.modelUsage,
-                unknownModelsByDay: scan.unknownModelsByDay
+                unknownModelsByDay: scan.unknownModelsByDay,
+                fallbackPricingModelsByDay: scan.fallbackPricingModelsByDay
             )
             SpendTileMapper.appendTokenUsage(
                 scan.series, to: &mapped.lines, now: now(),
                 unknownModelsByDay: scan.unknownModelsByDay,
                 modelUsage: scan.modelUsage,
-                modelSourceNote: note
+                modelSourceNote: baseNote,
+                fallbackPricingModelsByDay: scan.fallbackPricingModelsByDay
             )
-            SpendTileMapper.appendUsageTrend(scan.series, to: &mapped.lines, now: now(), note: note)
+            SpendTileMapper.appendUsageTrend(
+                scan.series, to: &mapped.lines, now: now(), note: baseNote,
+                fallbackPricingModelsByDay: scan.fallbackPricingModelsByDay
+            )
         }
 
         MetricLine.appendNoDataIfNeeded(&mapped.lines)
@@ -169,6 +203,16 @@ final class CodexProvider: ProviderRuntime {
             refreshedAt: now(),
             usageHistory: usageHistory
         )
+    }
+
+    private static func localUsageSourceNote(hasPi: Bool, hasOpenCode: Bool) -> String {
+        var sources = ["Codex logs"]
+        if hasPi { sources.append("pi") }
+        if hasOpenCode { sources.append("OpenCode") }
+        let joined = sources.count > 2
+            ? sources.dropLast().joined(separator: ", ") + ", and " + sources[sources.count - 1]
+            : sources.joined(separator: " and ")
+        return "From your \(joined) (estimated)"
     }
 
     /// Fetches the on-demand reset-credit balance (and per-credit expiry) without ever failing the

@@ -1,4 +1,5 @@
 import Foundation
+import KeyboardShortcuts
 import Observation
 
 /// Composition root: owns the (constant) registry and the (mutable) stores, injected
@@ -21,21 +22,24 @@ final class AppContainer {
     /// Quota pace notification preferences (three independent triggers). Drives the Settings section
     /// and is read by `WidgetDataStore.evaluateNotifications`.
     let notificationSettings: NotificationSettingsStore
-    /// Anonymous, opt-out usage telemetry (daily rollups). Exposed so Settings can toggle it and the
-    /// app-termination hook can flush any queued events.
+    /// Anonymous usage telemetry (mandatory daily activity and crashes, optional provider rollups).
+    /// Exposed so Settings can toggle extra analytics and termination can flush queued events.
     let telemetry: TelemetryRecorder
     /// Source of truth for the popover's transparency: the persisted Increase Transparency toggle, the
     /// ephemeral secret-code easter-egg state, and the system accessibility flags it yields to. Read by both
     /// the SwiftUI surface and the AppKit panel (`StatusItemController`).
     let transparency: PopoverTransparencyStore
+    /// The menu bar's screen-share privacy mode: the persisted Hide From Screen Share toggle
+    /// plus the live capture signal. Read by `StatusItemImageUpdater` to swap the strip for the
+    /// wordmark while the screen is shared or recorded.
+    let privacy: MenuBarPrivacyStore
     /// One-time onboarding state (the first-run Customize hint card). Only ever marked pending by
     /// `FirstRunSeeder` on a fresh install, so existing installs never see the card.
     let onboarding: OnboardingStore
     /// Claims Codex rate-limit reset credits from the resets popover (the app's only provider-API
-    /// write). Shares the Codex provider's auth store and usage client; `nil` only if the Codex
-    /// provider were ever removed from the registry. Injected into the view tree via
-    /// `\.codexResetClaim`.
-    let codexResetClaim: CodexResetClaimService?
+    /// write). Each service shares its card's auth store and usage client. The view tree selects
+    /// the matching service from `\.codexResetClaims` for each card's resets popover.
+    let codexResetClaims: [String: CodexResetClaimService]
     /// The provider runtimes, kept so on-demand credential detection (the Customize "Reset All" reseed)
     /// can re-probe `hasLocalCredentials()` the same way first-run seeding does.
     private let providers: [ProviderRuntime]
@@ -50,22 +54,41 @@ final class AppContainer {
     /// The new-provider credential-detection pass (see `NewProviderSeeder`); `nil` unless this launch is
     /// the first with a provider the install has never seen.
     private let newProviderTask: Task<Void, Never>?
+    /// Persists a fresh `ShellEnvironmentSnapshot` once the login-shell capture completes, so the next
+    /// launch can read shell-exported facts (provider home overrides) even when its own capture is slow.
+    private let shellEnvironmentSnapshotTask: Task<Void, Never>
 
     /// `isFreshInstall` must be captured by the caller BEFORE `SettingsMigrator.migrate()` runs (the
     /// migrator's schema stamp makes the defaults domain non-empty). See `AppDelegate`.
-    init(isFreshInstall: Bool = false) {
+    init(isFreshInstall: Bool = false) async {
         // Capture the user's login-shell environment off-main so provider keys exported in a shell
         // profile (e.g. OPENROUTER_API_KEY) resolve in a Finder/Dock-launched build, not only when
         // run from a terminal. Warmed here so the first refresh finds the cache ready.
         LoginShellEnvironment.shared.prewarm()
+        // Once the capture lands, persist its identity-relevant facts so the NEXT launch has them
+        // even if that launch's own capture is slow (see `ShellEnvironmentSnapshot`).
+        self.shellEnvironmentSnapshotTask = ShellEnvironmentSnapshotStore(defaults: .standard).startRefreshTask()
+        // The launch account pass: which account is signed in at each family's default home. Feeds
+        // the snapshot cache's account stamp and reconciles the account registry.
+        let accountAssembly = await ProviderAccountAssembly.make(waitsForLoginShell: true)
 
-        let providers = ProviderCatalog.make()
+        let providers = ProviderCatalog.make(
+            claudeCards: accountAssembly.claudeCards,
+            codexCards: accountAssembly.codexCards,
+            claudeIdentityKeys: accountAssembly.identityKeysByCard
+        )
         let registry = WidgetRegistry.from(providers)
         let apiKeyProviders = providers.compactMap { $0 as? any APIKeyManaging }
         let enablement = ProviderEnablementStore()
         let notificationSettings = NotificationSettingsStore()
+        let accountDefaults: ([String]) -> [String] = { metricIDs in
+            DefaultLayout.expandingAccounts(metricIDs, providerIDs: registry.providers.map(\.id))
+        }
         let layout = LayoutStore(
             registry: registry,
+            defaultMetricIDs: accountDefaults(DefaultLayout.metricIDs),
+            defaultPinnedMetricIDs: accountDefaults(DefaultLayout.pinnedMetricIDs),
+            defaultExpandedMetricIDs: accountDefaults(DefaultLayout.expandedMetricIDs),
             isProviderEnabled: { [enablement] in enablement.isEnabled($0) }
         )
         let dataStore = WidgetDataStore(
@@ -73,7 +96,8 @@ final class AppContainer {
             providers: providers,
             isProviderEnabled: { [enablement] in enablement.isEnabled($0) },
             orderedDescriptors: { [layout] in layout.visiblePlaced.compactMap { layout.descriptor(for: $0) } },
-            notificationSettings: { notificationSettings }
+            notificationSettings: { notificationSettings },
+            providerIdentityKeys: accountAssembly.identityKeysByCard
         )
         let iCloudSync = ICloudUsageSyncStore(dataStore: dataStore)
         // Re-enabling a provider should fetch it promptly, so clear any leftover failure backoff before
@@ -115,8 +139,8 @@ final class AppContainer {
         // forced refresh returns `.skipped` when another refresh already owns the provider — and that
         // in-flight probe may carry *pre-claim* usage — so retry until this refresh actually runs
         // (bounded; the racing probe finishes in seconds).
-        self.codexResetClaim = providers.compactMap { $0 as? CodexProvider }.first.map { codex in
-            CodexResetClaimService(
+        self.codexResetClaims = Dictionary(uniqueKeysWithValues: providers.compactMap { $0 as? CodexProvider }.map { codex in
+            (codex.provider.id, CodexResetClaimService(
                 authStore: codex.authStore,
                 usageClient: codex.usageClient,
                 refreshAfterClaim: { [weak dataStore] in
@@ -148,13 +172,14 @@ final class AppContainer {
                     }
                     AppLog.error(LogTag.plugin("codex"), "post-claim refresh kept being skipped; meters may lag until the next cycle")
                 }
-            )
-        }
+            ))
+        })
 
-        // Anonymous, opt-out usage telemetry (two daily-rollup events). Its state lives in a dedicated
-        // UserDefaults suite, kept separate from app settings so the user's opt-out choice and the
-        // install id stay independent of any settings change. The snapshot closure reads the live
-        // layout/enablement so `app_daily_active` always reflects the current configuration.
+        // Anonymous usage telemetry (mandatory daily activity and crashes, optional provider rollups).
+        // Its state lives in a dedicated UserDefaults suite, kept separate from app settings so the user's
+        // optional-analytics choice and the install id stay independent of any settings change. The
+        // snapshot closure reads the live layout/enablement so `app_daily_active` always reflects
+        // the current configuration.
         let telemetryStore = TelemetryStore()
         let telemetry = TelemetryRecorder(
             sink: PostHogTelemetrySink(enabled: telemetryStore.enabled),
@@ -181,6 +206,7 @@ final class AppContainer {
         }
         self.telemetry = telemetry
         self.transparency = PopoverTransparencyStore()
+        self.privacy = MenuBarPrivacyStore()
         self.localAPI = LocalUsageServer(state: { [layout, enablement, dataStore] in
             LocalUsageAPI.State(
                 enabledOrderedIDs: layout.orderedProviderIDs().filter { enablement.isEnabled($0) },
@@ -212,6 +238,7 @@ final class AppContainer {
         refreshTask.cancel()
         seedTask?.cancel()
         newProviderTask?.cancel()
+        shellEnvironmentSnapshotTask.cancel()
     }
 
     /// Re-runs first-launch credential detection on demand — the enablement half of the Customize
@@ -220,6 +247,41 @@ final class AppContainer {
     @discardableResult
     func reseedEnabledProviders() -> Task<Void, Never> {
         FirstRunSeeder.reseed(providers: providers, enablement: enablement)
+    }
+
+    /// The Settings "Reset All Settings" action: restores every user preference the container owns to
+    /// its default (see `docs/settings.md` § Reset). Composes the Customize reset (`resetToDefault` +
+    /// provider reseed) with the Settings-only preferences. Deliberately untouched: telemetry (the
+    /// optional-analytics choice and install id stay independent of settings changes — see the
+    /// `TelemetryStore` note above), the iCloud sync device identity, provider credentials, and
+    /// cached usage snapshots.
+    /// Launch at Login and the Sparkle update preferences live outside the container; the Settings
+    /// screen resets those alongside this call.
+    func resetAllSettings() {
+        layout.resetToDefault()
+        // The menu-bar Icon Style is a Settings preference, not part of the Customize layout reset.
+        layout.menuBarStyle = .text
+        reseedEnabledProviders()
+        dataStore.resetDisplaySettings()
+        notificationSettings.resetToDefaults()
+        transparency.resetToDefaults()
+        privacy.hideUsageWhileScreenSharing = false
+        // Same as flipping the Settings toggle off: stops syncing and removes this Mac's document
+        // from the shared iCloud container (peers keep their own history).
+        iCloudSync.enabled = false
+        // Removing an `@AppStorage` key restores its declared default; the Settings screen's
+        // `@AppStorage` properties observe the change. New settings must be added here.
+        for key in [
+            AppearanceSetting.key, TimeFormatSetting.key, DensitySetting.key,
+            ReduceAnimationsSetting.key, LogLevelSetting.key, TotalSpendSetting.key,
+            TotalSpendSetting.periodKey, TotalSpendSetting.metricKey,
+        ] {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        KeyboardShortcuts.reset(.togglePopover)
+        AppearanceSetting.applyCurrent()
+        AppLog.reloadLevel()
+        AppLog.info(.config, "All settings reset to defaults")
     }
 
     /// Drives live updates: refresh on launch, then again every refresh interval. Each pass honors the
@@ -249,9 +311,9 @@ final class AppContainer {
                 // and on every loop (not just on a fetch) so pace worsening from elapsed time alone still
                 // alerts even with the popover closed.
                 await dataStore.evaluateNotifications()
-                // Day-rollover beat: emits `app_daily_active` once per local day and flushes any
-                // prior-day provider rollups. Runs on launch and every interval, so always-running
-                // instances still produce a daily-active signal.
+                // Day-rollover beat: always emits `app_daily_active` once per local day; flushes
+                // prior-day provider rollups only while optional analytics are on. Runs on launch
+                // and every interval, so always-running instances still produce a daily-active signal.
                 telemetry.tick()
                 await wakeSignal.waitForWake(timeout: RefreshSetting.interval)
             }

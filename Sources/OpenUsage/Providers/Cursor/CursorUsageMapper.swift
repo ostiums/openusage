@@ -80,6 +80,37 @@ enum CursorUsageError: Error, LocalizedError, Equatable {
 enum CursorUsageMapper {
     static let billingPeriodMs = MetricPeriod.monthMs
 
+    /// Grok Bot is Cursor's "Sand" product, with its own weekly allowance and reset window. Pooled
+    /// enterprise accounts and accounts without an included allowance have no separate personal meter.
+    static func mapGrokBotUsage(_ usage: [String: Any]) -> MetricLine? {
+        guard usage["usesPooledEnterpriseAllowance"] as? Bool != true,
+              usage["hasNonZeroIncludedLimit"] as? Bool != false,
+              usage["includedLimitZero"] as? Bool != true,
+              let percent = ProviderParse.number(usage["usagePercent"]),
+              percent >= 0
+        else {
+            return nil
+        }
+
+        let reset = (usage["nextResetTimestampUtc"] as? String).flatMap(OpenUsageISO8601.date(from:))
+        let start = (usage["currentPeriodStart"] as? String).flatMap(OpenUsageISO8601.date(from:))
+        let periodDurationMs: Int
+        if let start, let reset, reset > start {
+            periodDurationMs = Int(reset.timeIntervalSince(start) * 1000)
+        } else {
+            periodDurationMs = MetricPeriod.weekMs
+        }
+
+        return .progress(
+            label: "Grok Bot usage",
+            used: ProviderParse.clampPercent(percent),
+            limit: 100,
+            format: .percent,
+            resetsAt: reset,
+            periodDurationMs: periodDurationMs
+        )
+    }
+
     static func mapUsage(
         usage: [String: Any],
         planName: String?,
@@ -139,7 +170,7 @@ enum CursorUsageMapper {
 
         if let autoPercentUsed = ProviderParse.number(planUsage["autoPercentUsed"]) {
             lines.append(.progress(
-                label: "Auto usage",
+                label: "Cursor Models",
                 used: autoPercentUsed,
                 limit: 100,
                 format: .percent,
@@ -150,7 +181,7 @@ enum CursorUsageMapper {
 
         if let apiPercentUsed = ProviderParse.number(planUsage["apiPercentUsed"]) {
             lines.append(.progress(
-                label: "API usage",
+                label: "Other Models",
                 used: apiPercentUsed,
                 limit: 100,
                 format: .percent,
@@ -294,7 +325,8 @@ enum CursorUsageMapper {
             costByDay[day, default: 0] += cost
             tokensByDay[day, default: 0] += row.tokens.totalTokens
             let modelName = model.isEmpty ? ModelUsageEntry.unattributedModelName : model
-            let family = model.isEmpty ? modelName : familyName(for: model, pricing: pricing)
+            // `-fast` folds into the base family (`gpt-5.5-extra-high-fast` -> `gpt-5.5-fast` -> `gpt-5.5`).
+            let family = model.isEmpty ? modelName : pricing.familyName(for: model, stripping: ["-fast"])
             modelsByDay[day, default: [:]][family, default: ModelAccumulator()].add(
                 variant: modelName,
                 tokens: row.tokens.totalTokens,
@@ -333,16 +365,6 @@ enum CursorUsageMapper {
             modelUsage: modelUsage,
             unknownModelsByDay: unknownModelsByDay
         )
-    }
-
-    /// The display family for a raw CSV slug: its canonical pricing key with a `-fast` suffix folded
-    /// into the base (`gpt-5.5-extra-high-fast` → `gpt-5.5-fast` → `gpt-5.5`). Slugs no alias rule
-    /// knows keep their raw name — a wrong guess would silently merge unrelated models.
-    private static func familyName(for model: String, pricing: ModelPricing) -> String {
-        let canonical = pricing.supplement.canonicalName(for: model) ?? model
-        guard canonical.hasSuffix("-fast") else { return canonical }
-        let base = String(canonical.dropLast("-fast".count))
-        return base.isEmpty ? canonical : base
     }
 
     private struct ModelAccumulator {

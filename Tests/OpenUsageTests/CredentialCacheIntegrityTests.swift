@@ -41,6 +41,23 @@ final class CredentialSystemClientIntegrityTests: XCTestCase {
         XCTAssertEqual(runner.callCount, 1)
         XCTAssertTrue(runner.lastArguments.contains("-readonly"))
     }
+
+    func testSQLiteQueryRetriesWALOpenFailureWithQueryOnlyConnection() throws {
+        let database = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OpenUsageTests.wal.\(UUID().uuidString).sqlite")
+        try Data().write(to: database)
+        defer { try? FileManager.default.removeItem(at: database) }
+        let runner = CredentialCountingProcessRunner()
+        runner.readOnlyOpenFails = true
+
+        XCTAssertNil(
+            try SQLiteCLIAccessor(processRunner: runner)
+                .queryValue(path: database.path, sql: "SELECT value FROM ItemTable LIMIT 1")
+        )
+        XCTAssertEqual(runner.callCount, 2)
+        XCTAssertFalse(runner.lastArguments.contains("-readonly"))
+        XCTAssertTrue(runner.lastArguments.contains("PRAGMA query_only = ON"))
+    }
 }
 
 @MainActor
@@ -182,31 +199,19 @@ final class AntigravityCredentialCacheIntegrityTests: XCTestCase {
         XCTAssertEqual(Set(authorizations), ["Bearer cached-access"])
     }
 
-    func testMalformedStructuredKeychainValueIsNotSentAsBearerToken() async {
-        let http = RoutingHTTPClient { _ in
-            XCTFail("malformed structured credentials must not be sent")
-            return HTTPResponse(statusCode: 500, headers: [:], body: Data())
+    func testMalformedStructuredKeychainValuesAreNeverSentAsBearerTokens() async {
+        for malformed in ["{broken-json", "\u{FEFF} \n\t{broken-json"] {
+            let http = RoutingHTTPClient { _ in
+                XCTFail("malformed structured credentials must not be sent")
+                return HTTPResponse(statusCode: 500, headers: [:], body: Data())
+            }
+            let provider = makeProvider(keychain: FakeKeychain(malformed), files: FakeFiles(), http: http)
+
+            let snapshot = await provider.refresh()
+
+            XCTAssertEqual(snapshot.errorCategory, .authInvalid, malformed)
+            XCTAssertTrue(http.requests.isEmpty, malformed)
         }
-        let provider = makeProvider(keychain: FakeKeychain("{broken-json"), files: FakeFiles(), http: http)
-
-        let snapshot = await provider.refresh()
-
-        XCTAssertEqual(snapshot.errorCategory, .authInvalid)
-        XCTAssertTrue(http.requests.isEmpty)
-    }
-
-    func testBOMPrefixedMalformedStructuredKeychainValueIsNotSentAsBearerToken() async {
-        let http = RoutingHTTPClient { _ in
-            XCTFail("BOM-prefixed malformed structured credentials must not be sent")
-            return HTTPResponse(statusCode: 500, headers: [:], body: Data())
-        }
-        let malformed = "\u{FEFF} \n\t{broken-json"
-        let provider = makeProvider(keychain: FakeKeychain(malformed), files: FakeFiles(), http: http)
-
-        let snapshot = await provider.refresh()
-
-        XCTAssertEqual(snapshot.errorCategory, .authInvalid)
-        XCTAssertTrue(http.requests.isEmpty)
     }
 
     private func makeStore(files: TextFileAccessing) -> AntigravityAuthStore {
@@ -224,6 +229,7 @@ final class AntigravityCredentialCacheIntegrityTests: XCTestCase {
             authStore: AntigravityAuthStore(keychain: keychain, files: files, now: { fixedNow }),
             usageClient: AntigravityUsageClient(lsHTTP: http, http: http),
             discovery: LanguageServerDiscovery(processRunner: CredentialEmptyProcessRunner()),
+            dbUsageScanner: AntigravityDbUsageScanner(conversationsDirectories: { ["/nonexistent-antigravity-tests"] }),
             now: { fixedNow }
         )
     }
@@ -239,6 +245,8 @@ final class AntigravityCredentialCacheIntegrityTests: XCTestCase {
 private final class CredentialCountingProcessRunner: ProcessRunning, @unchecked Sendable {
     private(set) var callCount = 0
     private(set) var lastArguments: [String] = []
+    /// Fails every `-readonly` invocation the way sqlite3 does on a WAL database with an unreadable -shm.
+    var readOnlyOpenFails = false
 
     func run(
         executable: String,
@@ -248,6 +256,9 @@ private final class CredentialCountingProcessRunner: ProcessRunning, @unchecked 
     ) throws -> ProcessResult {
         callCount += 1
         lastArguments = arguments
+        if readOnlyOpenFails, arguments.contains("-readonly") {
+            return ProcessResult(exitCode: 1, stdout: "", stderr: "Error: unable to open database file (14)")
+        }
         return ProcessResult(exitCode: 0, stdout: "", stderr: "")
     }
 }

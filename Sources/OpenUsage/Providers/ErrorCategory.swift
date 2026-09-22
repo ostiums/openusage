@@ -55,7 +55,7 @@ extension ClaudeAuthError: CategorizedError {
     var errorCategory: ErrorCategory {
         switch self {
         case .notLoggedIn: .notLoggedIn
-        case .sessionExpired, .tokenExpired, .desktopTokenExpired: .authExpired
+        case .sessionExpired, .tokenExpired, .desktopTokenExpired, .swapTokenExpired: .authExpired
         case .invalidOAuthURL, .desktopCredentialsUnavailable: .authInvalid
         case .desktopPermissionRequired: .credentialAccess
         case .credentialsChanged: .other
@@ -172,11 +172,36 @@ extension CopilotUsageError: CategorizedError {
     }
 }
 
+extension OllamaAuthError: CategorizedError {
+    var errorCategory: ErrorCategory {
+        switch self {
+        case .missingKey, .notSignedIn: .notLoggedIn
+        case .keyUnreadable: .credentialAccess
+        case .invalidKey: .authInvalid
+        }
+    }
+}
+
+extension OllamaUsageError: CategorizedError {
+    var errorCategory: ErrorCategory {
+        switch self {
+        case .connectionFailed: .network
+        case .invalidResponse: .decoding
+        case .requestFailed(let status): ErrorCategory.http(status)
+        }
+    }
+}
+
 extension OpenCodeUsageError: CategorizedError {
     var errorCategory: ErrorCategory {
         switch self {
         case .notLoggedIn: .notLoggedIn
         case .credentialsUnreadable, .databaseUnreadable: .credentialAccess
+        case .unauthorized: .authExpired
+        case .noGoSubscription: .notAvailable
+        case .connectionFailed: .network
+        case .invalidResponse: .decoding
+        case .requestFailed(let status): ErrorCategory.http(status)
         }
     }
 }

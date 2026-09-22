@@ -13,7 +13,7 @@ jobs:
     name: Close stale issues and PRs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/stale@v10
+      - uses: actions/stale@v11
         with:
           stale-issue-message: >
             This issue has been inactive for 30 days. It will be closed in 3 days
@@ -29,5 +29,5 @@ jobs:
           days-before-close: 3
           stale-issue-label: stale
           stale-pr-label: stale
-          exempt-issue-labels: "pinned,security,approved,help wanted"
+          exempt-issue-labels: "pinned,security,approved,help wanted,keep-open"
           exempt-pr-labels: "pinned,security,keep-open,approved,gate-passed"

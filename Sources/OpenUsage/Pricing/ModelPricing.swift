@@ -25,6 +25,8 @@ final class ModelPricing: Sendable {
     /// Resolution walks every catalog entry on a fuzzy miss, so memoize per model name. Shared
     /// across threads; a pricing snapshot is immutable so entries never invalidate.
     private let memo = OSAllocatedUnfairLock<[String: ModelRates?]>(initialState: [:])
+    /// The alias scan walks every rule, and breakdown naming asks for the same slugs row after row.
+    private let canonicalMemo = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
 
     init(supplement: PricingSupplement, primary: PricingCatalog, secondary: PricingCatalog) {
         self.supplement = supplement
@@ -43,6 +45,28 @@ final class ModelPricing: Sendable {
         let resolved = resolveUncached(model: model)
         memo.withLock { $0[model] = resolved }
         return resolved
+    }
+
+    /// The canonical pricing key for `model`: the alias rule's target, or the raw name when no rule
+    /// matches. Memoized, unlike `PricingSupplement.canonicalName(for:)`.
+    func canonicalName(for model: String) -> String {
+        if let cached = canonicalMemo.withLock({ $0[model] }) { return cached }
+        let canonical = supplement.canonicalName(for: model) ?? model
+        canonicalMemo.withLock { $0[model] = canonical }
+        return canonical
+    }
+
+    /// The display family for a raw slug: its canonical key with the first matching suffix dropped
+    /// (`-fast` for Cursor, `-preview` for Antigravity), so effort variants, display labels, and
+    /// placeholder IDs share one breakdown row. Slugs no alias rule knows keep their raw name — a
+    /// guess would silently merge unrelated models.
+    func familyName(for model: String, stripping suffixes: [String]) -> String {
+        let canonical = canonicalName(for: model)
+        for suffix in suffixes where canonical.hasSuffix(suffix) {
+            let base = String(canonical.dropLast(suffix.count))
+            if !base.isEmpty { return base }
+        }
+        return canonical
     }
 
     /// Dollar cost of `tokens` for `model`, or nil when the model can't be priced. Aggregated sources

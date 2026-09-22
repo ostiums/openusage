@@ -1,19 +1,38 @@
 import Darwin
 import Foundation
+import Security
 
 protocol EnvironmentReading: Sendable {
     func value(for name: String) -> String?
 }
 
 struct ProcessEnvironmentReader: EnvironmentReading {
+    var processEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    var shellEnvironment: LoginShellEnvironment = .shared
+    var launchSnapshot: @Sendable () -> ShellEnvironmentSnapshot? = { ShellEnvironmentSnapshotStore.launchSnapshot }
+
+    private static let identityKeys = Set(ShellEnvironmentSnapshot.capturedKeys)
+
     func value(for name: String) -> String? {
         // The process environment first (set by launchd, `launchctl setenv`, or a terminal launch),
         // then the captured login-shell environment — so keys a user exports in their shell profile
         // still resolve in a packaged app launched from Finder/Dock. See `LoginShellEnvironment`.
-        if let value = ProcessInfo.processInfo.environment[name]?.nilIfEmpty {
+        if let value = processEnvironment[name]?.nilIfEmpty {
             return value
         }
-        return LoginShellEnvironment.shared.value(for: name)
+        // Identity-relevant keys (provider home overrides, OAuth endpoint switches) resolve from the
+        // persisted shell-environment snapshot when one exists: those facts — including "verifiably
+        // NOT exported" — are frozen for the whole session, so every reader (the launch account pass
+        // at init, the provider auth stores and log scanners whenever they run) sees the same home
+        // overrides no matter when the async login-shell capture lands. Without the pin, an export
+        // changed since the last launch would split them: identity read from the snapshot's home,
+        // usage fetched from the freshly captured one, mis-stamping the shared snapshot cache. A
+        // changed export applies from the next launch (the snapshot refresh task persists and logs
+        // it). Every other key reads the live capture as before.
+        if Self.identityKeys.contains(name), let snapshot = launchSnapshot() {
+            return snapshot.values[name]?.nilIfEmpty
+        }
+        return shellEnvironment.value(for: name)
     }
 }
 
@@ -150,7 +169,13 @@ struct SQLiteCLIAccessor: SQLiteAccessing {
         // A normal sqlite3 open can create a missing database. Credential probes must be read-only and
         // side-effect free, so absence returns nil before a process is launched.
         guard try databaseExists(path) else { return nil }
-        let result = try run(path: path, sql: sql, readOnly: true)
+        var result = try run(path: path, sql: sql, mode: .readOnly)
+        // A WAL-mode database whose -shm file cannot be opened read-only fails to open under
+        // -readonly. Retry with a connection that may set up the WAL sidecars but is still refused any
+        // write by `PRAGMA query_only`; a genuine error fails the same way again.
+        if !result.succeeded {
+            result = try run(path: path, sql: sql, mode: .queryOnly)
+        }
         guard result.succeeded else {
             throw SQLiteError.queryFailed(result.stderr)
         }
@@ -165,9 +190,17 @@ struct SQLiteCLIAccessor: SQLiteAccessing {
         }
     }
 
-    private func run(path: String, sql: String, readOnly: Bool = false) throws -> ProcessResult {
+    private enum OpenMode {
+        case readWrite, readOnly, queryOnly
+    }
+
+    private func run(path: String, sql: String, mode: OpenMode = .readWrite) throws -> ProcessResult {
         var arguments = ["-batch", "-noheader"]
-        if readOnly { arguments.append("-readonly") }
+        switch mode {
+        case .readWrite: break
+        case .readOnly: arguments.append("-readonly")
+        case .queryOnly: arguments += ["-cmd", "PRAGMA query_only = ON"]
+        }
         arguments += [
             "-cmd", ".timeout 1000",
             expandHome(path),
@@ -227,6 +260,19 @@ extension KeychainAccessing {
     func readGenericPassword(service: String, account: String) throws -> String? {
         try readGenericPassword(service: service)
     }
+
+    /// Whether an item exists for `service`, without reading its secret. `nil` means the probe
+    /// itself failed (locked keychain, denied) — the caller picks its own safe side, which is not
+    /// the same for every caller. The default (for mocks) falls back to a read; the real
+    /// `SecurityKeychainAccessor` overrides this with an in-process attributes-only probe, safe for
+    /// the launch path — it can't trigger an unlock prompt and returns in microseconds.
+    func genericPasswordExists(service: String) -> Bool? {
+        do {
+            return try readGenericPassword(service: service) != nil
+        } catch {
+            return nil
+        }
+    }
 }
 
 struct SecurityKeychainAccessor: KeychainAccessing {
@@ -244,6 +290,25 @@ struct SecurityKeychainAccessor: KeychainAccessing {
 
     func readGenericPassword(service: String) throws -> String? {
         try readPassword(["find-generic-password", "-s", service, "-w"], service: service)
+    }
+
+    /// Attributes-only existence probe used on the launch path: an in-process Security-framework
+    /// query (no subprocess, returns in microseconds) that never requests the secret and forbids
+    /// any UI, so it can neither trigger an unlock prompt nor stall launch. A failed probe (locked
+    /// keychain, denied) reports `nil` ("unknown"), never a definite answer, so callers can pick
+    /// their safe side.
+    func genericPasswordExists(service: String) -> Bool? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
+        ]
+        switch SecItemCopyMatching(query as CFDictionary, nil) {
+        case errSecSuccess: return true
+        case errSecItemNotFound: return false
+        default: return nil
+        }
     }
 
     func readGenericPasswordForCurrentUser(service: String) throws -> String? {
