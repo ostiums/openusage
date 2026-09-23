@@ -88,6 +88,9 @@ else
 fi
 
 pkill -x "$TARGET_NAME" >/dev/null 2>&1 || true
+# WidgetKit keeps the extension process alive across rebuilds, so without this the desktop widgets keep
+# running the previous build's code. Match the staged path so an installed release is left alone.
+pkill -f "$APP_BUNDLE/Contents/PlugIns/OpenUsageWidgets.appex/" >/dev/null 2>&1 || true
 
 echo "==> swift build ($CONFIG)"
 swift build -c "$CONFIG"
