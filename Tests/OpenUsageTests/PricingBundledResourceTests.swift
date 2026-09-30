@@ -194,6 +194,20 @@ final class PricingBundledResourceTests: XCTestCase {
         XCTAssertEqual(opus5.costDollars(for: fastTokens), opus5.costDollars(for: tokens) * 2, accuracy: 0.000_001)
     }
 
+    func testClaudeSonnet55PricingAndAliases() throws {
+        let pricing = Self.pricing
+        let sonnet55 = try XCTUnwrap(pricing.resolve(model: "claude-sonnet-5-5"))
+        XCTAssertEqual(sonnet55.inputPerMillion, 2.0)
+        XCTAssertEqual(sonnet55.cacheWritePerMillion, 2.5)
+        XCTAssertEqual(sonnet55.cacheReadPerMillion, 0.2)
+        XCTAssertEqual(sonnet55.outputPerMillion, 10.0)
+
+        for slug in ["claude-sonnet-5.5", "claude-sonnet-5-5-low", "claude-sonnet-5-5-medium", "claude-sonnet-5-5-high", "claude-sonnet-5-5-thinking-max", "claude-sonnet-5-5[1m]"] {
+            XCTAssertEqual(pricing.resolve(model: slug), sonnet55, slug)
+        }
+        XCTAssertNotEqual(pricing.resolve(model: "claude-sonnet-5"), sonnet55)
+    }
+
     func testClaudeOpus55PricingAndAliases() throws {
         let pricing = Self.pricing
         let standard = try XCTUnwrap(pricing.resolve(model: "claude-opus-5-5"))
@@ -258,6 +272,7 @@ final class PricingBundledResourceTests: XCTestCase {
             "Opus 5.5 (Auto Balanced)": "claude-opus-5-5",
             "Claude Opus 5.5 Fast (Auto)": "claude-opus-5-5-fast",
             "Opus 4.8 (Auto)": "claude-opus-4-8",
+            "Sonnet 5.5 (Auto Balanced)": "claude-sonnet-5-5",
             "Sonnet 5 (Auto Intelligence)": "claude-sonnet-5",
             "Fable 5 (Auto Balanced)": "claude-fable-5",
             "Fable 5.1 (Auto Balanced)": "claude-fable-5.1",
