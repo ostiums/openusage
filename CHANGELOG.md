@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.7.13-beta.3
+
+### New Features
+- **codex:** one card per account across Codex homes and pi logins (read-only) ([#1321](https://github.com/robinebers/openusage/pull/1321)) by @robinebers
+- **codex:** price Ultrafast and GPT-6 Sol models ([#1327](https://github.com/robinebers/openusage/pull/1327)) by @robinebers
+- **pricing:** price Cursor grok-bot-cua as Grok 4.7 ([#1329](https://github.com/robinebers/openusage/pull/1329)) by @robinebers
+- **pricing:** price Claude Sonnet 5.5 by @robinebers
+
+### Bug Fixes
+- **settings:** shorten the analytics toggle label and caption ([#1328](https://github.com/robinebers/openusage/pull/1328)) by @robinebers
+- **codex:** keep tier on tierless settings records and price Ultrafast -fast slugs at 6x ([#1331](https://github.com/robinebers/openusage/pull/1331)) by @robinebers
+- **settings:** rename update toggle to Check Automatically ([#1330](https://github.com/robinebers/openusage/pull/1330)) by @robinebers
+- **claude:** keep verified launch-cached limits on the first 429 after relaunch ([#1325](https://github.com/robinebers/openusage/pull/1325)) by @robinebers
+- **cursor:** bound usage CSV export to a 20s deadline ([#1324](https://github.com/robinebers/openusage/pull/1324)) by @robinebers
+- Tolerate glued shell banners and recalculate pricing for every Codex card ([#1320](https://github.com/robinebers/openusage/pull/1320)) by @robinebers
+- **grok:** keep local spend when team billing returns 412 ([#1272](https://github.com/robinebers/openusage/pull/1272)) by @slycrel
+- **opencode:** read OpenCode 2 usage and Go credentials ([#1323](https://github.com/robinebers/openusage/pull/1323)) by @robinebers
+- **ollama:** warn when the plan response can't be read ([#1300](https://github.com/robinebers/openusage/pull/1300)) by @tduarte
+- **claude:** preserve complete credential document during rotation ([#1316](https://github.com/robinebers/openusage/pull/1316)) by @robinebers
+- **codex:** scope Keychain reads and rotation writes to CLI account ([#1317](https://github.com/robinebers/openusage/pull/1317)) by @robinebers
+- **process:** isolate each pipe drain from the shared utility pool ([#1318](https://github.com/robinebers/openusage/pull/1318)) by @robinebers
+- **claude:** count terminal sessions when multiple accounts are known ([#1299](https://github.com/robinebers/openusage/pull/1299)) by @robinebers
+
+### Chores
+- **deps:** bump actions/checkout from 6 to 7 ([#1307](https://github.com/robinebers/openusage/pull/1307)) by @dependabot
+- **deps:** bump github.com/posthog/posthog-ios from 3.76.0 to 3.81.0 ([#1308](https://github.com/robinebers/openusage/pull/1308)) by @dependabot
+
+---
+
+### Changelog
+**Full Changelog**: [v0.7.13-beta.2...v0.7.13-beta.3](https://github.com/robinebers/openusage/compare/v0.7.13-beta.2...v0.7.13-beta.3)
+
+- [ca3d724](https://github.com/robinebers/openusage/commit/ca3d7246214a221517544e62fc03bd3ca6e91101) fix(settings): shorten the analytics toggle label and caption (#1328) by @robinebers
+- [c975fdf](https://github.com/robinebers/openusage/commit/c975fdf329da41136092c43fe8cffe7dad04aa9c) fix(codex): keep tier on tierless settings records and price Ultrafast -fast slugs at 6x (#1331) by @robinebers
+- [69f9c8a](https://github.com/robinebers/openusage/commit/69f9c8a8e7f56f2402a363c2ef22328c7e2104d7) fix(settings): rename update toggle to Check Automatically (#1330) by @robinebers
+- [5d18be4](https://github.com/robinebers/openusage/commit/5d18be41c91dc3f1610a2ae80efadf4b05487ce3) feat(codex): one card per account across Codex homes and pi logins (read-only) (#1321) by @robinebers
+- [cd7cb6a](https://github.com/robinebers/openusage/commit/cd7cb6af908c2ea460514a0c891979d3eff8c84b) feat(codex): price Ultrafast and GPT-6 Sol models (#1327) by @robinebers
+- [b78a80a](https://github.com/robinebers/openusage/commit/b78a80a5160d54ce5278c856b9977b22f99151cd) feat(pricing): price Cursor grok-bot-cua as Grok 4.7 (#1329) by @robinebers
+- [e2b3f2b](https://github.com/robinebers/openusage/commit/e2b3f2bca0055fff591da227c81d48b2dcaa7f25) fix(claude): keep verified launch-cached limits on the first 429 after relaunch (#1325) by @robinebers
+- [f647345](https://github.com/robinebers/openusage/commit/f64734526de00359c04264764931a4f8bfb42a7f) fix(cursor): bound usage CSV export to a 20s deadline (#1324) by @robinebers
+- [7ea6704](https://github.com/robinebers/openusage/commit/7ea6704e1a184e70c832fc192e2a2c807029b3e3) fix: tolerate glued shell banners and recalculate pricing for every Codex card (#1320) by @robinebers
+- [37f9a21](https://github.com/robinebers/openusage/commit/37f9a2194bd5fa70e5ef4d0028d6e59e898571b8) fix(grok): keep local spend when team billing returns 412 (#1272) by @slycrel
+- [a704506](https://github.com/robinebers/openusage/commit/a704506b2570caa47a38471b0051a8a5f2060257) fix(opencode): read OpenCode 2 usage and Go credentials (#1323) by @robinebers
+- [3a6c659](https://github.com/robinebers/openusage/commit/3a6c6597dd62107e38ea551a2813831f6c3707d1) fix(ollama): warn when the plan response can't be read (#1300) by @tduarte
+- [5ef8405](https://github.com/robinebers/openusage/commit/5ef840538266af4cf33e924c60bd5ff3662eda7f) chore(deps): bump actions/checkout from 6 to 7 (#1307) by @dependabot
+- [7a63ded](https://github.com/robinebers/openusage/commit/7a63dede00e1bb81656fe54c87b1bf7d19ae3ffa) chore(deps): bump github.com/posthog/posthog-ios from 3.76.0 to 3.81.0 (#1308) by @dependabot
+- [c92ab6a](https://github.com/robinebers/openusage/commit/c92ab6ad405995e975eaf8e57f427c5d21667914) fix(claude): preserve complete credential document during rotation (#1316) by @robinebers
+- [85c94b4](https://github.com/robinebers/openusage/commit/85c94b42459e74ab1d75937cfd2b1f0800f47db2) fix(codex): scope Keychain reads and rotation writes to CLI account (#1317) by @robinebers
+- [4490145](https://github.com/robinebers/openusage/commit/4490145103381a65e3029309c7ba21de12069924) fix(process): isolate each pipe drain from the shared utility pool (#1318) by @robinebers
+- [2d2eabe](https://github.com/robinebers/openusage/commit/2d2eabe5e2764db9eff5ecf4dc7952443787659f) feat(pricing): price Claude Sonnet 5.5 by @robinebers
+- [4ce7887](https://github.com/robinebers/openusage/commit/4ce788775e0cb3ec779d353b2ac9f9d7e8765bb4) fix(claude): count terminal sessions when multiple accounts are known (#1299) by @robinebers
+
 ## v0.7.13-beta.2
 
 ### New Features

@@ -7,7 +7,7 @@ enum ProviderCatalog {
     static func make(
         defaults: UserDefaults = .standard,
         claudeCards: [ClaudeAccountCard] = [],
-        codexCards: [CodexAccountCard] = [],
+        codex: CodexAccountDiscovery = CodexAccountDiscovery(),
         claudeIdentityKeys: [String: String] = [:]
     ) -> [ProviderRuntime] {
         // Default provider order (see AGENTS.md "## Providers"): the three established providers first,
@@ -42,13 +42,27 @@ enum ProviderCatalog {
                 )
             }
         }
-        if codexCards.isEmpty {
-            providers.append(CodexProvider())
+        if codex.cards.isEmpty {
+            providers.append(CodexProvider(
+                authStore: CodexAuthStore(
+                    additionalAuthHomes: codex.plainAuthHomes,
+                    piCredentialSources: codex.plainPiCredentialSources
+                ),
+                logUsageScanner: CodexLogUsageScanner(
+                    allowsUnattributedHistory: codex.allowsUnattributedHistory,
+                    additionalHomes: codex.plainAuthHomes
+                ),
+                allowsUnattributedHistory: codex.allowsUnattributedHistory
+            ))
         } else {
-            providers += codexCards.map { card in
+            providers += codex.cards.map { card in
                 CodexProvider(
                     provider: CodexProvider.makeProvider(id: card.id, displayName: card.displayName),
-                    authStore: CodexAuthStore(expectedIdentity: card.identity, additionalAuthHomes: card.authHomes),
+                    authStore: CodexAuthStore(
+                        expectedIdentity: card.identity,
+                        additionalAuthHomes: card.authHomes,
+                        piCredentialSources: card.piCredentialSources
+                    ),
                     logUsageScanner: CodexLogUsageScanner(
                         allowsUnattributedHistory: card.allowsUnattributedHistory,
                         additionalHomes: card.logHomes
