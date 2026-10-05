@@ -10,33 +10,40 @@ final class CodexProvider: ProviderRuntime {
     }
 
     let provider: Provider
-    let allowsUnattributedHistory: Bool
-    var allowsCachedLocalHistory: Bool { allowsUnattributedHistory }
+    let historyScope: CodexHistoryScope
+
+    private let localHistory = CodexHistoryRefresh<CodexLocalHistory>()
+    let localHistoryWait: Duration
 
     let authStore: CodexAuthStore
     let usageClient: CodexUsageClient
     let logUsageScanner: CodexLogUsageScanner
+    let piUsageScanner: PiUsageScanner
     let openCodeUsageScanner: OpenCodeCodexUsageScanner
     let now: @Sendable () -> Date
     let pricing: @Sendable () async -> ModelPricing
     let fallbackModel: @MainActor () -> String?
 
     init(
+        localHistoryWait: Duration = .seconds(5),
         provider: Provider = CodexProvider.makeProvider(),
         authStore: CodexAuthStore = CodexAuthStore(),
         usageClient: CodexUsageClient = CodexUsageClient(),
         logUsageScanner: CodexLogUsageScanner = CodexLogUsageScanner(),
+        piUsageScanner: PiUsageScanner = .shared,
         openCodeUsageScanner: OpenCodeCodexUsageScanner = OpenCodeCodexUsageScanner(),
-        allowsUnattributedHistory: Bool = true,
+        historyScope: CodexHistoryScope = .allHomes,
         now: @escaping @Sendable () -> Date = Date.init,
         pricing: @escaping @Sendable () async -> ModelPricing = { await ModelPricingStore.shared.current() },
         fallbackModel: @escaping @MainActor () -> String? = { CodexFallbackModelSetting.current() }
     ) {
+        self.localHistoryWait = localHistoryWait
         self.provider = provider
-        self.allowsUnattributedHistory = allowsUnattributedHistory
+        self.historyScope = historyScope
         self.authStore = authStore
         self.usageClient = usageClient
         self.logUsageScanner = logUsageScanner
+        self.piUsageScanner = piUsageScanner
         self.openCodeUsageScanner = openCodeUsageScanner
         self.now = now
         self.pricing = pricing
@@ -88,8 +95,9 @@ final class CodexProvider: ProviderRuntime {
         var lastFallbackError: Error?
 
         for candidate in fileCandidates {
+            var state = candidate
             do {
-                return try await probe(authState: candidate)
+                return try await probe(authState: &state)
             } catch let error as CodexAuthError where error.allowsAuthFallback {
                 lastFallbackError = error
                 continue
@@ -98,9 +106,9 @@ final class CodexProvider: ProviderRuntime {
             }
         }
 
-        if let keychainCandidate = await loadOffMainActor({ [authStore] in authStore.loadKeychainAuth() }) {
+        if var keychainCandidate = await loadOffMainActor({ [authStore] in authStore.loadKeychainAuth() }) {
             do {
-                return try await probe(authState: keychainCandidate)
+                return try await probe(authState: &keychainCandidate)
             } catch {
                 return ProviderSnapshot.error(provider: provider, error: error)
             }
@@ -112,8 +120,17 @@ final class CodexProvider: ProviderRuntime {
         return ProviderSnapshot.error(provider: provider, error: CodexAuthError.notLoggedIn)
     }
 
-    private func probe(authState initialState: CodexAuthState) async throws -> ProviderSnapshot {
-        var authState = initialState
+    /// Fetches usage for one credential, refreshing and persisting its token when it may. On return
+    /// `authState` holds the credential as last written, so callers can check it is still current.
+    func probe(authState: inout CodexAuthState) async throws -> ProviderSnapshot {
+        var onDisk = authState
+        return try await probe(authState: &authState, onDisk: &onDisk)
+    }
+
+    /// `authState` is the working credential; `onDisk` is what its source held when we last read or
+    /// wrote it. They differ once a rotated token could not be written back: the fresh token keeps
+    /// serving this refresh while conflict checks still compare against the source.
+    func probe(authState: inout CodexAuthState, onDisk: inout CodexAuthState) async throws -> ProviderSnapshot {
         guard var accessToken = authState.auth.tokens?.accessToken, !accessToken.isEmpty else {
             if authState.auth.apiKey?.isEmpty == false {
                 throw CodexAuthError.usageAPIKey
@@ -125,9 +142,10 @@ final class CodexProvider: ProviderRuntime {
             // The `codex` CLI may have rotated the token on disk since we loaded it. Re-read the live
             // credential first and adopt its (newer) access token — refreshing our stale copy would send
             // an already-rotated refresh_token and trip `refresh_token_reused` (issue #516).
-            if let live = reloadLiveAuth(source: authState.source),
+            if let live = await reloadLiveAuth(source: authState.source),
                let liveToken = live.auth.tokens?.accessToken, !liveToken.isEmpty {
                 authState = live
+                onDisk = live
                 accessToken = liveToken
             }
         }
@@ -135,11 +153,11 @@ final class CodexProvider: ProviderRuntime {
         if authStore.needsRefresh(authState.auth),
            let refreshToken = authState.auth.tokens?.refreshToken,
            !refreshToken.isEmpty {
-            let refreshed = try await refreshAccessToken(authState: &authState, refreshToken: refreshToken)
+            let refreshed = try await refreshAccessToken(authState: &authState, onDisk: &onDisk, refreshToken: refreshToken)
             accessToken = refreshed
         }
 
-        let response = try await fetchUsageWithRetry(accessToken: accessToken, authState: &authState)
+        let response = try await fetchUsageWithRetry(accessToken: accessToken, authState: &authState, onDisk: &onDisk)
         // The access token may have rotated during the usage fetch's refresh-and-retry; read the live one.
         let currentToken = authState.auth.tokens?.accessToken ?? accessToken
         let resetCredits = await fetchResetCreditsBestEffort(
@@ -153,56 +171,103 @@ final class CodexProvider: ProviderRuntime {
 
     func snapshot(mapped initial: CodexMappedUsage) async -> ProviderSnapshot {
         var mapped = initial
-        // Local spend tiles, scanned natively from the Codex CLI's session rollouts and priced through
-        // the shared pricing store, merged with Codex usage that happened inside pi or OpenCode. Those
-        // agents attribute their underlying Codex OAuth traffic back to this card.
-        let pricing = await pricing()
-        // Three independent local sources: reading rollout files, pi's JSONL, and OpenCode's SQLite
-        // concurrently keeps the slowest one — not their sum — on the refresh's critical path.
-        let selectedFallbackModel = fallbackModel()
-        async let native = logUsageScanner.scan(
-            now: now(), pricing: pricing, fallbackModel: selectedFallbackModel
-        )
-        async let pi = allowsUnattributedHistory ? PiUsageScanner.shared.scan(
-            cardID: provider.id, now: now(), pricing: pricing,
-            estimateCost: { CodexUsagePricing.estimatedCost(pricing: pricing, model: $0, tokens: $1) }
-        )
-            : nil
-        async let openCode = allowsUnattributedHistory
-            ? openCodeUsageScanner.scan(now: now(), pricing: pricing) : nil
-        let (nativeScan, piScan, openCodeScan) = await (native, pi, openCode)
-        var usageHistory: ProviderUsageHistory?
-        // Cancellation can land between the local scans. Treat them as one unit so a
-        // partial result cannot replace the last-good combined history in WidgetDataStore.
-        if !Task.isCancelled, let scan = DailyUsageAccumulator.merged([nativeScan, piScan, openCodeScan]) {
-            let baseNote = Self.localUsageSourceNote(hasPi: piScan != nil, hasOpenCode: openCodeScan != nil)
-            usageHistory = ProviderUsageHistory(
-                series: scan.series,
-                modelUsage: scan.modelUsage,
-                unknownModelsByDay: scan.unknownModelsByDay,
-                fallbackPricingModelsByDay: scan.fallbackPricingModelsByDay
-            )
-            SpendTileMapper.appendTokenUsage(
-                scan.series, to: &mapped.lines, now: now(),
-                unknownModelsByDay: scan.unknownModelsByDay,
-                modelUsage: scan.modelUsage,
-                modelSourceNote: baseNote,
-                fallbackPricingModelsByDay: scan.fallbackPricingModelsByDay
-            )
-            SpendTileMapper.appendUsageTrend(
-                scan.series, to: &mapped.lines, now: now(), note: baseNote,
-                fallbackPricingModelsByDay: scan.fallbackPricingModelsByDay
+        // pi logs name a provider family, not an account card.
+        let piCardID = ProviderAccountID.family(of: provider.id)
+        let history = await localHistory.value(wait: localHistoryWait) {
+            [pricing, fallbackModel, historyScope, authStore, logUsageScanner, piUsageScanner,
+             openCodeUsageScanner, now] in
+            let claims = await Self.historyClaims(scope: historyScope, authStore: authStore,
+                                                  logUsageScanner: logUsageScanner)
+            return await Self.scanLocalHistory(
+                claims: claims, claimsPiUsage: historyScope.claimsPiUsage, piCardID: piCardID, pricing: pricing, fallbackModel: fallbackModel, logUsageScanner: logUsageScanner,
+                piUsageScanner: piUsageScanner, openCodeUsageScanner: openCodeUsageScanner, now: now
             )
         }
-
-        MetricLine.appendNoDataIfNeeded(&mapped.lines)
+        if let history, let usage = history.usageHistory {
+            // A retained scan may be collected on a later day; project Today/Yesterday at collection.
+            SpendTileMapper.appendTokenUsage(
+                usage.series, to: &mapped.lines, now: now(),
+                unknownModelsByDay: usage.unknownModelsByDay, modelUsage: usage.modelUsage,
+                modelSourceNote: history.sourceNote,
+                fallbackPricingModelsByDay: usage.fallbackPricingModelsByDay
+            )
+            SpendTileMapper.appendUsageTrend(
+                usage.series, to: &mapped.lines, now: now(), note: history.sourceNote,
+                fallbackPricingModelsByDay: usage.fallbackPricingModelsByDay
+            )
+        }
+        let warning = history == nil ? "Local token history is still updating." : nil
+        if warning != nil {
+            AppLog.warn(LogTag.plugin("codex"), "local history scan deferred; publishing live quota")
+        }
+        // Pending history is not evidence of no usage. The store may restore last-good spend rows.
+        if history != nil { MetricLine.appendNoDataIfNeeded(&mapped.lines) }
         return ProviderSnapshot.make(
-            provider: provider,
-            plan: mapped.plan,
-            lines: mapped.lines,
-            refreshedAt: now(),
-            usageHistory: usageHistory
+            provider: provider, plan: mapped.plan, lines: mapped.lines, refreshedAt: now(),
+            usageHistory: history?.usageHistory, warning: warning
         )
+    }
+
+    private struct CodexLocalHistory: Sendable {
+        var sourceNote: String
+        var usageHistory: ProviderUsageHistory?
+    }
+
+    private static func historyClaims(
+        scope: CodexHistoryScope, authStore: CodexAuthStore, logUsageScanner: CodexLogUsageScanner
+    ) async -> CodexHistoryClaims {
+        switch scope {
+        case .allHomes:
+            return CodexHistoryClaims(logHomes: await logUsageScanner.allHomes(), ownsDefaultLogin: true)
+        case let .account(identity, homes, _):
+            return await loadOffMainActor { homes.claims(for: identity, authStore: authStore) }
+        }
+    }
+
+    private static func scanLocalHistory(
+        claims: CodexHistoryClaims,
+        claimsPiUsage: Bool,
+        piCardID: String,
+        pricing: @Sendable () async -> ModelPricing,
+        fallbackModel: @MainActor () -> String?,
+        logUsageScanner: CodexLogUsageScanner,
+        piUsageScanner: PiUsageScanner,
+        openCodeUsageScanner: OpenCodeCodexUsageScanner,
+        now: @Sendable () -> Date
+    ) async -> CodexLocalHistory {
+        let pricing = await pricing()
+        // Three independent local sources: reading rollout files, pi's JSONL, and OpenCode's SQLite
+        // concurrently keeps the slowest one — not their sum — on the background scan's path.
+        let selectedFallbackModel = fallbackModel()
+        async let native = logUsageScanner.scan(
+            homes: claims.logHomes, now: now(), pricing: pricing, fallbackModel: selectedFallbackModel
+        )
+        async let pi = claimsPiUsage ? piUsageScanner.scan(
+            cardID: piCardID, now: now(), pricing: pricing,
+            estimateCost: { CodexUsagePricing.estimatedCost(pricing: pricing, model: $0, tokens: $1) }
+        ) : nil
+        async let openCode = claims.ownsDefaultLogin ? openCodeUsageScanner.scan(now: now(), pricing: pricing) : nil
+        let (nativeScan, piScan, openCodeScan) = await (native, pi, openCode)
+        let baseNote = Self.localUsageSourceNote(hasPi: piScan != nil, hasOpenCode: openCodeScan != nil)
+        var usageHistory: ProviderUsageHistory?
+        // Cancellation must not publish a partial combined history.
+        if !Task.isCancelled {
+            if let scan = DailyUsageAccumulator.merged([nativeScan, piScan, openCodeScan]) {
+                usageHistory = ProviderUsageHistory(
+                    series: scan.series, modelUsage: scan.modelUsage,
+                    unknownModelsByDay: scan.unknownModelsByDay,
+                    fallbackPricingModelsByDay: scan.fallbackPricingModelsByDay
+                )
+            } else if claims.ownsNoHome && !claimsPiUsage {
+                // A card left with no source must clear, or the store keeps showing spend that moved
+                // to another card. An owned source that came back empty may have failed to read, so it
+                // keeps the last-good history instead.
+                usageHistory = ProviderUsageHistory(series: DailyUsageSeries(daily: []))
+            }
+        }
+
+        AppLog.info(LogTag.plugin("codex"), "local history scan completed")
+        return CodexLocalHistory(sourceNote: baseNote, usageHistory: usageHistory)
     }
 
     private static func localUsageSourceNote(hasPi: Bool, hasOpenCode: Bool) -> String {
@@ -228,9 +293,15 @@ final class CodexProvider: ProviderRuntime {
         }
     }
 
-    private func fetchUsageWithRetry(accessToken: String, authState: inout CodexAuthState) async throws -> HTTPResponse {
+    private func fetchUsageWithRetry(
+        accessToken: String, authState: inout CodexAuthState, onDisk: inout CodexAuthState
+    ) async throws -> HTTPResponse {
         var working = authState
-        defer { authState = working }
+        var baseline = onDisk
+        defer {
+            authState = working
+            onDisk = baseline
+        }
         return try await ProviderAuthRetry.fetch(
             token: accessToken,
             attempt: { try await self.usageClient.fetchUsage(accessToken: $0, accountID: working.auth.tokens?.accountID) },
@@ -239,7 +310,7 @@ final class CodexProvider: ProviderRuntime {
                     throw CodexAuthError.tokenExpired
                 }
                 do {
-                    return try await self.refreshAccessToken(authState: &working, refreshToken: refreshToken)
+                    return try await self.refreshAccessToken(authState: &working, onDisk: &baseline, refreshToken: refreshToken)
                 } catch let error as CodexAuthError {
                     throw error
                 } catch {
@@ -255,35 +326,54 @@ final class CodexProvider: ProviderRuntime {
     /// token the `codex` CLI rotated out-of-band is picked up before we attempt our own refresh. Reads
     /// only that one source — matching how `codex` reads the single `auth.json` from `CODEX_HOME` —
     /// rather than re-scanning every candidate path.
-    private func reloadLiveAuth(source: CodexAuthState.Source) -> CodexAuthState? {
+    private func reloadLiveAuth(source: CodexAuthState.Source) async -> CodexAuthState? {
         switch source {
         case .file(let path):
             return authStore.loadAuth(at: path)
         case .keychain(let account):
-            return authStore.loadKeychainAuth(account: account)
+            return await loadOffMainActor { [authStore] in authStore.loadKeychainAuth(account: account) }
         case .pi(let source):
             return authStore.loadPiAuth(source)
         }
     }
 
-    private func refreshAccessToken(authState: inout CodexAuthState, refreshToken: String) async throws -> String {
+    private func refreshAccessToken(
+        authState: inout CodexAuthState, onDisk: inout CodexAuthState, refreshToken: String
+    ) async throws -> String {
         let response = try await usageClient.refreshToken(refreshToken)
-        authState.auth.tokens?.accessToken = response.accessToken
+        // A login that changed while our request was in flight is newer than ours; never write over it.
+        guard await reloadLiveAuth(source: authState.source) == onDisk else {
+            AppLog.warn(LogTag.auth("codex"), "login changed while refreshing the token; keeping the login on disk")
+            throw CodexAuthError.tokenConflict
+        }
+        var rotated = authState
+        rotated.auth.tokens?.accessToken = response.accessToken
         if let refreshToken = response.refreshToken {
-            authState.auth.tokens?.refreshToken = refreshToken
+            rotated.auth.tokens?.refreshToken = refreshToken
         }
         if let idToken = response.idToken {
-            authState.auth.tokens?.idToken = idToken
+            rotated.auth.tokens?.idToken = idToken
         }
-        authState.auth.lastRefresh = OpenUsageISO8601.string(from: now())
+        rotated.auth.lastRefresh = OpenUsageISO8601.string(from: now())
         // Fail loudly: a swallowed save strands the rotated token on disk (next launch re-refreshes /
         // can surface a false "token expired"). The refreshed token works for this session, so log and
         // continue. This is also the only call site of authStore.save, so a genuinely undecodable
         // payload (CodexAuthError.invalidAuthPayload) now surfaces in the log instead of vanishing.
         do {
-            try authStore.save(authState)
+            try authStore.save(rotated, replacing: onDisk)
+            onDisk = rotated
+        } catch CodexAuthError.tokenConflict {
+            AppLog.warn(LogTag.auth("codex"), "login changed while refreshing the token; keeping the login on disk")
+            throw CodexAuthError.tokenConflict
         } catch {
             AppLog.error(LogTag.auth("codex"), "failed to persist rotated credentials; using the refreshed token for this session only: \(error.localizedDescription)")
+        }
+        authState = rotated
+        if authStore.expectedIdentity != nil {
+            if authStore.scoped(authState) == nil {
+                AppLog.warn(LogTag.auth("codex"), "rotated credential no longer names this account; trying a matching login")
+                throw CodexAuthError.tokenConflict
+            }
         }
         return response.accessToken
     }
