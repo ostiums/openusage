@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.7.14
+
+### New Features
+- Refresh and save tokens for independent Codex homes (#1322) by @robinebers.
+- Add Report an Issue to the Options menu (#1343) by @robinebers.
+
+### Bug Fixes
+- Keep the panel’s top edge steady during height animations (#1345) by @kennnyq.
+- Preserve each screen’s header and footer during navigation (#1346) by @kennnyq.
+- Restore Codex local spending for multiple accounts (#1349) by @robinebers.
+- Show OpenCode session reset countdowns below 1% usage by @hasan007-sudo.
+- Prefer structured Cursor team usage pools (#1337) by @robinebers.
+- Keep slow Codex history scans from blocking live quota (#1338) by @robinebers.
+- Update Codex plan names and preserve header labels (#1332) by @validatedev.
+
+### Chores
+- Update PostHog to 3.85.3 (#1347) by @app/dependabot.
+- Record the beta changelog by @robinebers.
+
+**Full Changelog**:
+https://github.com/robinebers/openusage/compare/v0.7.13...v0.7.14
+
 ## v0.7.14-beta.1
 
 ### New Features
