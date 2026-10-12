@@ -25,6 +25,7 @@ struct ProviderUsageWidgetView: View {
                     )
                 } else {
                     ProviderContentView(
+                        date: entry.date,
                         provider: provider,
                         metrics: selectedMetrics(for: provider),
                         isStale: entry.isStale,
@@ -80,6 +81,7 @@ struct ProviderUsageWidgetView: View {
 }
 
 private struct ProviderContentView: View {
+    let date: Date
     let provider: WidgetProviderRecord
     let metrics: [WidgetMetricRecord]
     let isStale: Bool
@@ -101,7 +103,13 @@ private struct ProviderContentView: View {
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                 ForEach(metrics) { metric in
-                    WidgetMetricView(metric: metric, compact: family != .systemLarge)
+                    WidgetMetricView(
+                        date: date,
+                        metric: metric,
+                        compact: family != .systemLarge,
+                        // A small widget's single column only has room for the leading unit.
+                        countdownStyle: family == .systemSmall ? .leadingUnit : .relative
+                    )
                 }
             }
 
@@ -140,9 +148,11 @@ private struct ProviderWidgetHeader: View {
 
     private var providerTitle: some View {
         HStack(spacing: 5) {
+            // A small widget's status icon leaves room for only one of the two; the plan gives way.
             Text(provider.displayName)
                 .font(.headline)
                 .lineLimit(1)
+                .layoutPriority(1)
             if let plan = provider.plan, !plan.isEmpty {
                 Text(plan)
                     .font(.caption2)
@@ -186,8 +196,11 @@ private struct ProviderWidgetHeader: View {
 }
 
 private struct WidgetMetricView: View {
+    /// The timeline entry's date. WidgetKit can render an entry before that moment arrives.
+    let date: Date
     let metric: WidgetMetricRecord
     let compact: Bool
+    let countdownStyle: CountdownStyle
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 3 : 5) {
@@ -197,13 +210,23 @@ private struct WidgetMetricView: View {
                 .lineLimit(1)
 
             if compact {
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     headline
-                    Spacer(minLength: 2)
+                    Spacer(minLength: 6)
                     if let resetAt = metric.resetAt {
-                        HStack(spacing: 2) {
-                            Image(systemName: "clock")
-                            Text(resetAt, style: .relative)
+                        // Live-updating text fills whatever width it is offered and has no usable ideal
+                        // width, so hidden static text reserves the widest countdown, the live text is
+                        // drawn over it, and the headline scales down instead of the countdown truncating.
+                        ZStack {
+                            ForEach(countdownTemplates(to: resetAt), id: \.self) { template in
+                                Text("\(Image(systemName: "clock")) \(template)").hidden()
+                            }
+                        }
+                        .fixedSize()
+                        .overlay(alignment: .trailing) {
+                            Text("\(Image(systemName: "clock")) \(countdown(to: resetAt))")
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -215,8 +238,7 @@ private struct WidgetMetricView: View {
             }
 
             if metric.kind == .progress, let progress = metric.progressFraction {
-                ProgressView(value: min(max(progress, 0), 1))
-                    .tint(severityColor)
+                WidgetProgressBar(fraction: progress, color: severityColor)
             }
 
             if !compact, let detail = metric.detail, !detail.isEmpty {
@@ -238,6 +260,32 @@ private struct WidgetMetricView: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func countdown(to resetAt: Date) -> Text {
+        switch style(to: resetAt) {
+        case .relative:
+            Text(resetAt, style: .relative)
+        case let style:
+            Text(.currentDate, format: style.offsetFormat(to: resetAt))
+        }
+    }
+
+    /// Near the reset the relative style adds seconds ("49 min, 26 secs") and gets too wide, so minutes
+    /// alone take over. Entries are at most 30 minutes apart, so switching 90 minutes out keeps the
+    /// relative style from reaching its seconds before the next entry replaces it.
+    private func style(to resetAt: Date) -> CountdownStyle {
+        if countdownStyle == .relative, resetAt.timeIntervalSince(date) < 90 * 60 { return .minutes }
+        return countdownStyle
+    }
+
+    /// The countdown as it reads at this entry and at the next one, digits widened to "8". Hidden copies
+    /// reserve that width, so the headline only scales down when the real countdown needs the room.
+    private func countdownTemplates(to resetAt: Date) -> [String] {
+        let style = style(to: resetAt)
+        return [date, date.addingTimeInterval(30 * 60)].map {
+            style.text(from: $0, to: resetAt).replacing(/\d/, with: "8")
+        }
+    }
+
     private var headline: some View {
         Text(metric.headline)
             .font(compact ? .subheadline : .headline)
@@ -252,6 +300,71 @@ private struct WidgetMetricView: View {
         case .warning: .orange
         case .normal: .accentColor
         case .neutral: .secondary
+        }
+    }
+}
+
+private enum CountdownStyle {
+    /// SwiftUI's relative date style: "2 hrs, 27 min", "5 days, 3 hrs".
+    case relative
+    /// "2 hours", "5 days".
+    case leadingUnit
+    /// "49 minutes".
+    case minutes
+
+    func offsetFormat(to resetAt: Date) -> SystemFormatStyle.DateOffset {
+        let fields: Set<Date.ComponentsFormatStyle.Field> = self == .minutes ? [.minute] : [.day, .hour, .minute]
+        return .offset(to: resetAt, allowedFields: fields, maxFieldCount: 1, sign: .never)
+    }
+
+    /// Static text for sizing. The relative style has no static formatter, so its shape is rebuilt from
+    /// the same units.
+    func text(from date: Date, to resetAt: Date) -> String {
+        guard self == .relative else {
+            return String(offsetFormat(to: resetAt).format(date).characters)
+        }
+        let minutes = max(0, Int(resetAt.timeIntervalSince(date)) / 60)
+        let (days, hours, mins) = (minutes / 1440, minutes / 60 % 24, minutes % 60)
+        func unit(_ value: Int, _ singular: String, _ plural: String) -> String {
+            "\(value) \(value == 1 ? singular : plural)"
+        }
+        if days > 0 {
+            return hours > 0 ? "\(unit(days, "day", "days")), \(unit(hours, "hr", "hrs"))" : unit(days, "day", "days")
+        }
+        return mins > 0 ? "\(unit(hours, "hr", "hrs")), \(mins) min" : unit(hours, "hr", "hrs")
+    }
+}
+
+/// A thin bar whose fill joins the accented group, so tinted widgets keep the fill and the translucent
+/// track apart (a `ProgressView` renders both in the same tint).
+private struct WidgetProgressBar: View {
+    let fraction: Double
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            Capsule()
+                .fill(.quaternary)
+            ProgressFill(fraction: min(max(fraction, 0), 1))
+                .fill(color)
+                .widgetAccentable()
+        }
+        .frame(height: 4)
+        .accessibilityHidden(true)
+    }
+
+    /// Sized from the laid-out rect rather than a `GeometryReader`, which reports an infinite width when an
+    /// `HStack` measures it and turns the fill width into NaN.
+    private struct ProgressFill: Shape {
+        let fraction: Double
+
+        func path(in rect: CGRect) -> Path {
+            Capsule().path(in: CGRect(
+                x: rect.minX,
+                y: rect.minY,
+                width: rect.width * fraction,
+                height: rect.height
+            ))
         }
     }
 }
