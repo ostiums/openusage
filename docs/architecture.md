@@ -22,9 +22,10 @@ grouped by role:
 ## Composition root
 
 `AppContainer` is the one place that wires everything together. At launch it builds the list of
-providers, turns it into a `WidgetRegistry`, creates the stores, starts the periodic refresh loop, and
-starts the local HTTP API. Everything else receives what it needs from here rather than reaching for
-globals, which keeps the pieces testable in isolation.
+providers, turns it into a `WidgetRegistry`, creates the stores, and starts the widget bridge and local
+HTTP API. Periodic provider refresh starts when the dashboard is ready; on a first launch, the welcome
+screen handles provider selection first. Everything else receives what it needs from here rather than
+reaching for globals, which keeps the pieces testable in isolation.
 
 The `openusage` executable imports the same module. A normal invocation reads `ProviderSnapshotCache`
 and exits; `--force` constructs the canonical `ProviderCatalog` and calls `WidgetDataStore`'s forced

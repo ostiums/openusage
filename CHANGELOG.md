@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.7.15-beta.1
+
+### New Features
+- Add a first-launch welcome screen that asks only after you pick providers ([#1380](https://github.com/robinebers/openusage/pull/1380)) by @robinebers
+
+### Bug Fixes
+- fix(codex): point the Dashboard link at chatgpt.com/settings/usage ([#1364](https://github.com/robinebers/openusage/pull/1364)) by @robinebers
+- fix(cursor): fetch spend history day by day and keep finished days per account ([#1373](https://github.com/robinebers/openusage/pull/1373)) by @robinebers
+- fix(pricing): accept -n shorthand for Gemini none effort variant ([#1371](https://github.com/robinebers/openusage/pull/1371)) by @validatedev
+- fix(ollama): read credits and limits from /api/balance ([#1368](https://github.com/robinebers/openusage/pull/1368)) by @robinebers
+- fix(opencode): keep reading auth.json on OpenCode 1 databases ([#1365](https://github.com/robinebers/openusage/pull/1365)) by @robinebers
+- fix(codex): make auto-review free from October 6 ([#1354](https://github.com/robinebers/openusage/pull/1354)) by @validatedev
+- fix(claude): check reset grants hourly instead of on every refresh ([#1367](https://github.com/robinebers/openusage/pull/1367)) by @robinebers
+- Fix persistent Keychain authorization prompts ([#1372](https://github.com/robinebers/openusage/pull/1372)) by @robinebers
+- fix(keychain): stop repeat Keychain popups and keep Always Allow ([#1379](https://github.com/robinebers/openusage/pull/1379)) by @robinebers
+
+### Chores
+- chore(deps): bump github.com/posthog/posthog-ios from 3.85.3 to 3.90.2 ([#1374](https://github.com/robinebers/openusage/pull/1374)) by @app/dependabot
+
+---
+
+### Changelog
+**Full Changelog**: [v0.7.14...v0.7.15-beta.1](https://github.com/robinebers/openusage/compare/v0.7.14...v0.7.15-beta.1)
+
+- [1c37176](https://github.com/robinebers/openusage/commit/1c37176762ff343810061af6fb965e6d9bf56659) fix(codex): point the Dashboard link at chatgpt.com/settings/usage (#1364) by @robinebers
+- [dc877ff](https://github.com/robinebers/openusage/commit/dc877fff18c95398121268a23b2447f7352eff04) chore(deps): bump github.com/posthog/posthog-ios from 3.85.3 to 3.90.2 (#1374) by @app/dependabot
+- [93e5897](https://github.com/robinebers/openusage/commit/93e5897bb0c1e3149ad4a3d4d999efbd743dff8c) fix(cursor): fetch spend history day by day and keep finished days per account (#1373) by @robinebers
+- [2fd740a](https://github.com/robinebers/openusage/commit/2fd740a79ec3cc5878975f790c8772c776b81d5d) fix(pricing): accept -n shorthand for Gemini none effort variant (#1371) by @validatedev
+- [677d886](https://github.com/robinebers/openusage/commit/677d886eb7482697db942422f01987ba0d8a8ded) fix(ollama): read credits and limits from /api/balance (#1368) by @robinebers
+- [34474ec](https://github.com/robinebers/openusage/commit/34474ec1eb90c31bdc0645cb0d8aad585f568daa) fix(opencode): keep reading auth.json on OpenCode 1 databases (#1365) by @robinebers
+- [b5a6e56](https://github.com/robinebers/openusage/commit/b5a6e56e5fd5c61360807227c2ea071a6ab2534a) fix(codex): make auto-review free from October 6 (#1354) by @validatedev
+- [60a379b](https://github.com/robinebers/openusage/commit/60a379b9546c05a9055930baf819c61324132274) fix(claude): check reset grants hourly instead of on every refresh (#1367) by @robinebers
+- [bb7de17](https://github.com/robinebers/openusage/commit/bb7de176def23a99bbdcaabe1ac7269f18c738be) Fix persistent Keychain authorization prompts (#1372) by @robinebers
+- [e87490a](https://github.com/robinebers/openusage/commit/e87490a8c483bb0ff397773936852d23e359a5fd) fix(keychain): stop repeat Keychain popups and keep Always Allow (#1379) by @robinebers
+- [5163dad](https://github.com/robinebers/openusage/commit/5163dad0c07d2982a2f9e808105ea6fb763c2c86) Add a first-launch welcome screen that asks only after you pick providers (#1380) by @robinebers
+
 ## v0.7.14
 
 ### New Features

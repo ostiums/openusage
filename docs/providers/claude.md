@@ -57,10 +57,13 @@ Both older Desktop login caches and newer account-specific caches are supported.
 tokens must match the account currently signed in to Desktop and the card's organization. A newer
 cache entry or deletion marker takes precedence over an older copy of the same login.
 
-macOS asks once before OpenUsage can access that Keychain item. Background refreshes never open the
-password dialog: OpenUsage first asks you to refresh manually, and choosing **Always Allow** makes later
-refreshes silent. If Desktop's short-lived token expires, open Claude Desktop so it can renew the login,
-then refresh OpenUsage.
+macOS asks before OpenUsage can access that Keychain item. Choosing **Always Allow** makes later
+refreshes silent. If you choose **Deny**, OpenUsage stops asking until you refresh manually. If Desktop's
+short-lived token expires, open Claude Desktop so it can renew the login, then refresh OpenUsage.
+
+OpenUsage reads and saves Claude Code's Keychain login the same way Claude Code does, through macOS's
+`security` tool. That read doesn't ask for access, and Claude Code keeps working after OpenUsage saves a
+renewed login.
 
 A `CLAUDE_CODE_OAUTH_TOKEN` — usually a long-lived `claude setup-token` — can run the model but can't read your Session and Weekly limits, and it often lingers in your shell environment. So when a real keychain or file login is present, OpenUsage uses that login for the live meters and keeps the environment token only as a fallback; the Session/Weekly meters no longer go blank just because that token is set. If the environment token is your *only* credential (a headless setup), it's used on its own and the spend tiles still load from local logs.
 
@@ -137,9 +140,14 @@ Local spend does not require a Claude OAuth login. If Claude Code uses an API-ke
 
 ## Under the hood
 
-`GET https://api.anthropic.com/api/oauth/usage?cedar_ember=1` with the selected OAuth token. The
-`cedar_ember=1` flag asks for the reset grants (Anthropic's internal name for the program), the same
-way Claude Code does. Claude Code tokens refresh via `platform.claude.com/v1/oauth/token`; Claude Desktop tokens are read-only and must be renewed by Desktop itself. If a token is expired or revoked, OpenUsage retries with the next credential source before reporting an error.
+`GET https://api.anthropic.com/api/oauth/usage` with the selected OAuth token. The Rate Limit Resets
+row comes from a separate `GET https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1`
+(`cedar_ember` is Anthropic's internal name for the reset grants), the same request Claude Code makes.
+Anthropic throttles that request when it's polled, so OpenUsage checks it at most once an hour per
+login and shows the last answer in between; a failed check keeps the previous value and tries again an
+hour later. Token refreshes keep that cached answer; switching accounts starts a separate check. If
+the login changes while a request is running, OpenUsage discards the old account's answer and reloads
+the current login before showing usage. Claude Code tokens refresh via `platform.claude.com/v1/oauth/token`; Claude Desktop tokens are read-only and must be renewed by Desktop itself. If a token is expired or revoked, OpenUsage retries with the next credential source before reporting an error.
 
 The plan badge reads `GET https://api.anthropic.com/api/oauth/profile` (the organization's `rate_limit_tier`), because the plan Claude Code saves at sign-in never updates afterwards. To stay clear of Anthropic's rate limits, that lookup runs at most once per access token — after a usage fetch has succeeded — and cards bound to a specific account reuse the profile they already fetched to verify identity, so they make no extra request. Inference-only tokens skip it entirely.
 

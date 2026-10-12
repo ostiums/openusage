@@ -19,6 +19,8 @@ Clicking a widget opens the OpenUsage popover at that provider. If the provider 
 widget-compatible metrics (for example, only Usage Trend remains), it opens the provider's Customize
 screen instead. If the widget has no provider to open or the chosen provider is no longer available,
 clicking it opens the dashboard so you can recover there.
+On a first launch, complete or skip the welcome screen first; OpenUsage then opens the widget's
+destination.
 
 ## Updates and stale data
 

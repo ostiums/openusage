@@ -1,4 +1,5 @@
 import XCTest
+import os
 @testable import OpenUsage
 
 /// The shipped pricing resources (supplement + LiteLLM/models.dev snapshots) as a ready-to-use
@@ -309,6 +310,44 @@ final class FakeKeychain: KeychainAccessing, @unchecked Sendable {
     }
 }
 
+final class ThreadRecordingKeychain: KeychainAccessing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: String]
+    private var writeWasMainThread: Bool?
+
+    var lastWriteWasMainThread: Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return writeWasMainThread
+    }
+
+    init(values: [String: String] = [:]) {
+        self.values = values
+    }
+
+    func readGenericPassword(service: String) throws -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return values[service]
+    }
+
+    func writeGenericPassword(service: String, value: String) throws {
+        let isMainThread = Thread.isMainThread
+        lock.lock()
+        values[service] = value
+        writeWasMainThread = isMainThread
+        lock.unlock()
+    }
+
+    func readGenericPassword(service: String, account: String) throws -> String? {
+        try readGenericPassword(service: service)
+    }
+
+    func writeGenericPassword(service: String, account: String, value: String) throws {
+        try writeGenericPassword(service: service, value: value)
+    }
+}
+
 final class ServiceKeychain: KeychainAccessing, @unchecked Sendable {
     var values: [String: String]
     var currentUserValues: [String: String]
@@ -522,7 +561,8 @@ final class KeyValueSQLite: SQLiteAccessing, @unchecked Sendable {
 /// Routes each request through a handler and records every request — for multi-request flows like
 /// the 401 → token refresh → retry sequence, where a single canned response can't express the flow.
 final class RoutingHTTPClient: HTTPClient, @unchecked Sendable {
-    var requests: [HTTPRequest] = []
+    private let requestsLock = OSAllocatedUnfairLock(initialState: [HTTPRequest]())
+    var requests: [HTTPRequest] { requestsLock.withLock { $0 } }
     private let handler: @Sendable (HTTPRequest) async throws -> HTTPResponse
 
     init(handler: @escaping @Sendable (HTTPRequest) async throws -> HTTPResponse) {
@@ -530,7 +570,14 @@ final class RoutingHTTPClient: HTTPClient, @unchecked Sendable {
     }
 
     func send(_ request: HTTPRequest) async throws -> HTTPResponse {
-        requests.append(request)
+        requestsLock.withLock { $0.append(request) }
         return try await handler(request)
     }
+}
+
+extension HTTPRequest {
+    /// Claude's hourly reset-grants check, which shares the usage endpoint's path.
+    var isClaudeResetGrantsCheck: Bool { url.query?.contains("cedar_ember=1") == true }
+    /// A regular Claude usage read, not the reset-grants check.
+    var isClaudeUsagePoll: Bool { url.path.hasSuffix("/api/oauth/usage") && !isClaudeResetGrantsCheck }
 }

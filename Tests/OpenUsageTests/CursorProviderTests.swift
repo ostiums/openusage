@@ -231,6 +231,34 @@ final class CursorUsageMapperTests: XCTestCase {
 
 @MainActor
 final class CursorProviderTests: XCTestCase {
+    func testRotatedKeychainAccessTokenPersistsOffMainThread() async {
+        let keychain = ThreadRecordingKeychain(values: [
+            CursorAuthStore.keychainAccessTokenService: "expired",
+            CursorAuthStore.keychainRefreshTokenService: "refresh"
+        ])
+        let http = RoutingHTTPClient { request in
+            if request.url == CursorUsageClient.refreshURL {
+                return HTTPResponse(
+                    statusCode: 200,
+                    headers: [:],
+                    body: Data(#"{"access_token":"rotated"}"#.utf8)
+                )
+            }
+            return HTTPResponse(statusCode: 404, headers: [:], body: Data())
+        }
+        let provider = CursorProvider(
+            authStore: CursorAuthStore(
+                sqlite: KeyValueSQLite(values: [:]),
+                keychain: keychain
+            ),
+            usageClient: CursorUsageClient(http: http)
+        )
+
+        _ = await provider.refresh()
+
+        XCTAssertEqual(keychain.lastWriteWasMainThread, false)
+    }
+
     func testModelCategoryDescriptorsMatchDashboardAndKeepStableIdentifiers() throws {
         let descriptors = CursorProvider().widgetDescriptors
         XCTAssertEqual(Array(descriptors.prefix(4).map(\.id)), [
@@ -309,7 +337,9 @@ final class CursorProviderTests: XCTestCase {
                 keychain: FakeKeychain()
             ),
             usageClient: CursorUsageClient(http: http),
-            now: { Date(timeIntervalSince1970: 1_800_000_000) }
+            now: { Date(timeIntervalSince1970: 1_800_000_000) },
+            usageHistoryStore: CursorUsageHistoryStore(directory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("cursor-provider-tests-\(UUID().uuidString)", isDirectory: true))
         )
 
         let snapshot = await provider.refresh()

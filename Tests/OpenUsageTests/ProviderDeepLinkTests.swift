@@ -124,6 +124,45 @@ final class ProviderDeepLinkTests: XCTestCase {
     }
 
     @MainActor
+    func testWelcomeCompletionKeepsQueuedDisabledProviderDestination() throws {
+        let url = try XCTUnwrap(URL(string: "openusage://provider/codex"))
+        var screen: PopoverScreen = .settings
+        var openedProviderID: String?
+
+        AppDelegate.openInitialDestination(
+            pendingURLs: [url],
+            showsDashboard: true,
+            openDashboard: { screen = .dashboard },
+            openURL: { url in
+                guard case .provider(let id) = ProviderDeepLink.parse(
+                    url, expectedScheme: "openusage", knownProviderIDs: knownProviderIDs
+                ) else {
+                    XCTFail("Expected a known provider link")
+                    return
+                }
+                let destination = ProviderDeepLinkDestination.resolve(isEnabled: false, hasVisibleMetrics: true)
+                screen = destination == .dashboard ? .dashboard : .customize
+                openedProviderID = id
+            }
+        )
+
+        XCTAssertEqual(screen, .customize, "The welcome dashboard must not replace the queued widget's destination")
+        XCTAssertEqual(openedProviderID, "codex")
+    }
+
+    @MainActor
+    func testWelcomeCompletionWithoutWidgetLinksOpensDashboard() {
+        var screen: PopoverScreen = .settings
+        AppDelegate.openInitialDestination(
+            pendingURLs: [],
+            showsDashboard: true,
+            openDashboard: { screen = .dashboard },
+            openURL: { _ in XCTFail("No widget link was queued") }
+        )
+        XCTAssertEqual(screen, .dashboard)
+    }
+
+    @MainActor
     func testDashboardFocusRequestValidatesAndRepeatsKnownProvider() {
         let suite = "OpenUsageTests.ProviderDeepLink.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

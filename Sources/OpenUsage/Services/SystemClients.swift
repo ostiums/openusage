@@ -246,6 +246,10 @@ protocol KeychainAccessing: Sendable {
     func readGenericPassword(service: String, account: String) throws -> String?
     /// Update the item belonging to this exact account, without changing another account's login.
     func writeGenericPassword(service: String, account: String, value: String) throws
+    /// Whether an item exists for `service`, without reading its secret. `nil` means the probe
+    /// itself failed (locked keychain, denied) — the caller picks its own safe side, which is not
+    /// the same for every caller.
+    func genericPasswordExists(service: String) -> Bool?
 }
 
 extension KeychainAccessing {
@@ -269,11 +273,7 @@ extension KeychainAccessing {
         throw KeychainError.writeFailed("Account-scoped Keychain writes are unavailable.")
     }
 
-    /// Whether an item exists for `service`, without reading its secret. `nil` means the probe
-    /// itself failed (locked keychain, denied) — the caller picks its own safe side, which is not
-    /// the same for every caller. The default (for mocks) falls back to a read; the real
-    /// `SecurityKeychainAccessor` overrides this with an in-process attributes-only probe, safe for
-    /// the launch path — it can't trigger an unlock prompt and returns in microseconds.
+    /// Default for mocks: falls back to a read.
     func genericPasswordExists(service: String) -> Bool? {
         do {
             return try readGenericPassword(service: service) != nil
@@ -283,21 +283,86 @@ extension KeychainAccessing {
     }
 }
 
-struct SecurityKeychainAccessor: KeychainAccessing {
-    let processRunner: ProcessRunning
+protocol SecurityItemAccessing: Sendable {
+    func readGenericPasswordData(service: String, account: String?) -> (status: OSStatus, data: Data?)
+    func firstGenericPasswordAccount(service: String) -> (status: OSStatus, account: String?)
+    func updateGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus
+    func addGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus
+}
 
-    init(processRunner: ProcessRunning = SystemProcessRunner()) {
-        self.processRunner = processRunner
+struct SystemSecurityItemAccessor: SecurityItemAccessing {
+    func readGenericPasswordData(service: String, account: String?) -> (status: OSStatus, data: Data?) {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnData as String: true,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIAllow,
+        ]
+        if let account {
+            query[kSecAttrAccount as String] = account
+        }
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        return (status, result as? Data)
     }
 
-    // `security find-generic-password` exits 44 (errSecItemNotFound) when no item matches — the
-    // legitimate "no credential stored" case. Any OTHER non-zero exit means a real failure (keychain
-    // locked or access denied, a cancelled unlock prompt) that must not be silently rendered as
-    // "not signed in".
-    private static let itemNotFoundExitCode: Int32 = 44
+    func firstGenericPasswordAccount(service: String) -> (status: OSStatus, account: String?) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let account = (result as? [String: Any])?[kSecAttrAccount as String] as? String ?? ""
+        return (status, account)
+    }
+
+    func updateGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus {
+        SecItemUpdate(
+            itemQuery(service: service, account: account) as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+    }
+
+    func addGenericPasswordData(service: String, account: String?, data: Data) -> OSStatus {
+        var attributes = itemQuery(service: service, account: account)
+        attributes[kSecValueData as String] = data
+        return SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    private func itemQuery(service: String, account: String?) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+        ]
+        if let account {
+            query[kSecAttrAccount as String] = account
+        }
+        return query
+    }
+}
+
+struct SecurityKeychainAccessor: KeychainAccessing {
+    let itemAccessor: any SecurityItemAccessing
+    let securityTool: any SecurityItemAccessing
+
+    init() {
+        self.init(itemAccessor: SystemSecurityItemAccessor(), securityTool: SecurityToolItemAccessor())
+    }
+
+    /// An injected fake serves both paths unless a test sets the `security` path apart, so a test can
+    /// never run the real `/usr/bin/security` against the user's Keychain by accident.
+    init(itemAccessor: any SecurityItemAccessing, securityTool: (any SecurityItemAccessing)? = nil) {
+        self.itemAccessor = itemAccessor
+        self.securityTool = securityTool ?? itemAccessor
+    }
 
     func readGenericPassword(service: String) throws -> String? {
-        try readPassword(["find-generic-password", "-s", service, "-w"], service: service)
+        try readPassword(service: service, account: nil)
     }
 
     /// Attributes-only existence probe used on the launch path: an in-process Security-framework
@@ -320,54 +385,84 @@ struct SecurityKeychainAccessor: KeychainAccessing {
     }
 
     func readGenericPasswordForCurrentUser(service: String) throws -> String? {
-        try readPassword(["find-generic-password", "-a", currentUserAccount(), "-s", service, "-w"], service: service)
+        try readPassword(service: service, account: currentUserAccount())
     }
 
     func readGenericPassword(service: String, account: String) throws -> String? {
-        try readPassword(["find-generic-password", "-a", account, "-s", service, "-w"], service: service)
+        try readPassword(service: service, account: account)
     }
 
-    private func readPassword(_ arguments: [String], service: String) throws -> String? {
-        let result = try processRunner.run(
-            executable: "/usr/bin/security",
-            arguments: arguments,
-            environment: [:],
-            timeout: 5
-        )
-        guard result.succeeded else {
-            if result.exitCode == Self.itemNotFoundExitCode { return nil }
-            // Log loudly here so a locked/denied keychain is diagnosable even though current callers
-            // `try?` this back to nil ("not signed in"). Surfacing a distinct user-facing "keychain
-            // locked" message needs the auth-load chains to propagate the throw (folded into H1).
-            AppLog.warn(.keychain, "read failed for service '\(service)' (exit \(result.exitCode))")
-            throw KeychainError.readFailed(result.stderr)
+    /// Each login is read and saved the way its own tool saves it, so the user's Always Allow survives
+    /// that tool's next save.
+    private func accessor(for service: String) -> any SecurityItemAccessing {
+        SecurityToolItemAccessor.handles(service: service) ? securityTool : itemAccessor
+    }
+
+    private func readPassword(service: String, account: String?) throws -> String? {
+        let result = KeychainAccessGuard.read(service: service) {
+            accessor(for: service).readGenericPasswordData(service: service, account: account)
         }
-        let value = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.status == errSecSuccess else {
+            if result.status == errSecItemNotFound { return nil }
+            let message = Self.errorMessage(for: result.status)
+            AppLog.warn(.keychain, "read failed for service '\(service)' (\(result.status)): \(message)")
+            throw KeychainError.readFailed(message)
+        }
+        guard let data = result.data, let password = String(data: data, encoding: .utf8) else {
+            let message = "Keychain item for service '\(service)' is not valid UTF-8."
+            AppLog.warn(.keychain, message)
+            throw KeychainError.readFailed(message)
+        }
+        let value = password.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
     }
 
     func writeGenericPassword(service: String, value: String) throws {
-        try writePassword(["add-generic-password", "-U", "-s", service, "-w", value])
+        try writePassword(service: service, account: nil, value: value)
     }
 
     func writeGenericPassword(service: String, account: String, value: String) throws {
-        try writePassword(["add-generic-password", "-U", "-a", account, "-s", service, "-w", value])
+        try writePassword(service: service, account: account, value: value)
     }
 
     func writeGenericPasswordForCurrentUser(service: String, value: String) throws {
-        try writePassword(["add-generic-password", "-U", "-a", currentUserAccount(), "-s", service, "-w", value])
+        try writePassword(service: service, account: currentUserAccount(), value: value)
     }
 
-    private func writePassword(_ arguments: [String]) throws {
-        let result = try processRunner.run(
-            executable: "/usr/bin/security",
-            arguments: arguments,
-            environment: [:],
-            timeout: 5
-        )
-        if !result.succeeded {
-            throw KeychainError.writeFailed(result.stderr)
+    private func writePassword(service: String, account: String?, value: String) throws {
+        let data = Data(value.utf8)
+        let items = accessor(for: service)
+        let status = KeychainAccessGuard.write(service: service) {
+            if account == nil {
+                let lookup = items.firstGenericPasswordAccount(service: service)
+                if lookup.status == errSecItemNotFound {
+                    return items.addGenericPasswordData(service: service, account: nil, data: data)
+                }
+                guard lookup.status == errSecSuccess else { return lookup.status }
+                return Self.updateOrAddPassword(items, service: service, account: lookup.account ?? "", data: data)
+            }
+            return Self.updateOrAddPassword(items, service: service, account: account, data: data)
         }
+        guard status == errSecSuccess else {
+            let message = Self.errorMessage(for: status)
+            AppLog.warn(.keychain, "write failed for service '\(service)' (\(status)): \(message)")
+            throw KeychainError.writeFailed(message)
+        }
+    }
+
+    private static func updateOrAddPassword(
+        _ items: any SecurityItemAccessing,
+        service: String,
+        account: String?,
+        data: Data
+    ) -> OSStatus {
+        let updateStatus = items.updateGenericPasswordData(service: service, account: account, data: data)
+        guard updateStatus == errSecItemNotFound else { return updateStatus }
+        return items.addGenericPasswordData(service: service, account: account, data: data)
+    }
+
+    private static func errorMessage(for status: OSStatus) -> String {
+        SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
     }
 
     private func currentUserAccount() -> String {
