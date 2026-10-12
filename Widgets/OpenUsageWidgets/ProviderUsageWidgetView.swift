@@ -214,17 +214,18 @@ private struct WidgetMetricView: View {
                     headline
                     Spacer(minLength: 6)
                     if let resetAt = metric.resetAt {
+                        let style = style(to: resetAt)
                         // Live-updating text fills whatever width it is offered and has no usable ideal
                         // width, so hidden static text reserves the widest countdown, the live text is
                         // drawn over it, and the headline scales down instead of the countdown truncating.
                         ZStack {
-                            ForEach(countdownTemplates(to: resetAt), id: \.self) { template in
-                                Text("\(Image(systemName: "clock")) \(template)").hidden()
+                            ForEach(countdownTemplates(style, to: resetAt), id: \.self) { template in
+                                clockLabel(Text(template)).hidden()
                             }
                         }
                         .fixedSize()
-                        .overlay(alignment: .trailing) {
-                            Text("\(Image(systemName: "clock")) \(countdown(to: resetAt))")
+                        .overlay {
+                            clockLabel(countdown(style, to: resetAt))
                                 .multilineTextAlignment(.trailing)
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
@@ -260,8 +261,12 @@ private struct WidgetMetricView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func countdown(to resetAt: Date) -> Text {
-        switch style(to: resetAt) {
+    private func clockLabel(_ text: Text) -> Text {
+        Text("\(Image(systemName: "clock")) \(text)")
+    }
+
+    private func countdown(_ style: CountdownStyle, to resetAt: Date) -> Text {
+        switch style {
         case .relative:
             Text(resetAt, style: .relative)
         case let style:
@@ -269,19 +274,18 @@ private struct WidgetMetricView: View {
         }
     }
 
-    /// Near the reset the relative style adds seconds ("49 min, 26 secs") and gets too wide, so minutes
-    /// alone take over. Entries are at most 30 minutes apart, so switching 90 minutes out keeps the
-    /// relative style from reaching its seconds before the next entry replaces it.
+    /// Within the last hour the relative style adds seconds ("49 min, 26 secs") and gets too wide, so
+    /// minutes alone take over one entry early, before the next entry could be drawn inside that hour.
     private func style(to resetAt: Date) -> CountdownStyle {
-        if countdownStyle == .relative, resetAt.timeIntervalSince(date) < 90 * 60 { return .minutes }
+        let minutesStyleFrom: TimeInterval = 60 * 60 + WidgetTimelineSchedule.entrySpacing
+        if countdownStyle == .relative, resetAt.timeIntervalSince(date) < minutesStyleFrom { return .minutes }
         return countdownStyle
     }
 
     /// The countdown as it reads at this entry and at the next one, digits widened to "8". Hidden copies
     /// reserve that width, so the headline only scales down when the real countdown needs the room.
-    private func countdownTemplates(to resetAt: Date) -> [String] {
-        let style = style(to: resetAt)
-        return [date, date.addingTimeInterval(30 * 60)].map {
+    private func countdownTemplates(_ style: CountdownStyle, to resetAt: Date) -> [String] {
+        [date, date.addingTimeInterval(WidgetTimelineSchedule.entrySpacing)].map {
             style.text(from: $0, to: resetAt).replacing(/\d/, with: "8")
         }
     }
@@ -317,21 +321,15 @@ private enum CountdownStyle {
         return .offset(to: resetAt, allowedFields: fields, maxFieldCount: 1, sign: .never)
     }
 
-    /// Static text for sizing. The relative style has no static formatter, so its shape is rebuilt from
-    /// the same units.
+    /// Static text for sizing. SwiftUI's relative style reads like the abbreviated components style
+    /// limited to its two leading units.
     func text(from date: Date, to resetAt: Date) -> String {
         guard self == .relative else {
             return String(offsetFormat(to: resetAt).format(date).characters)
         }
-        let minutes = max(0, Int(resetAt.timeIntervalSince(date)) / 60)
-        let (days, hours, mins) = (minutes / 1440, minutes / 60 % 24, minutes % 60)
-        func unit(_ value: Int, _ singular: String, _ plural: String) -> String {
-            "\(value) \(value == 1 ? singular : plural)"
-        }
-        if days > 0 {
-            return hours > 0 ? "\(unit(days, "day", "days")), \(unit(hours, "hr", "hrs"))" : unit(days, "day", "days")
-        }
-        return mins > 0 ? "\(unit(hours, "hr", "hrs")), \(mins) min" : unit(hours, "hr", "hrs")
+        let fields: Set<Date.ComponentsFormatStyle.Field> =
+            resetAt.timeIntervalSince(date) >= 24 * 60 * 60 ? [.day, .hour] : [.hour, .minute]
+        return Date.ComponentsFormatStyle(style: .abbreviated, fields: fields).format(date..<max(date, resetAt))
     }
 }
 

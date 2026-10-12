@@ -19,7 +19,7 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
     // WidgetKit schedules background updates within a limited daily budget. Thirty minutes avoids
     // declaring healthy host data outdated merely because a five-minute host reload was coalesced.
     private let staleInterval: TimeInterval = 30 * 60
-    private let fallbackInterval: TimeInterval = 30 * 60
+    private let fallbackInterval = WidgetTimelineSchedule.entrySpacing
     private let minimumTimelineSpacing: TimeInterval = 5 * 60
 
     func placeholder(in context: Context) -> ProviderUsageEntry {
@@ -31,7 +31,7 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
         in context: Context
     ) async -> ProviderUsageEntry {
         if context.isPreview { return .placeholder }
-        return entry(for: configuration, at: .now)
+        return entry(for: selection(for: configuration), at: .now)
     }
 
     func timeline(
@@ -39,40 +39,32 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
         in context: Context
     ) async -> Timeline<ProviderUsageEntry> {
         let now = Date()
-        let current = entry(for: configuration, at: now)
-        var entries = [current]
+        let selection = selection(for: configuration)
+        var dates = WidgetTimelineSchedule.entryDates(from: now)
 
-        if case .provider(let provider) = current.selection,
-           !current.isStale,
-           let refreshedAt = provider.refreshedAt {
-            let staleAt = max(
+        if case .provider(let provider) = selection, let refreshedAt = provider.refreshedAt {
+            dates.append(max(
                 refreshedAt.addingTimeInterval(staleInterval),
                 now.addingTimeInterval(minimumTimelineSpacing)
-            )
-            entries.append(ProviderUsageEntry(
-                date: staleAt,
-                selection: current.selection,
-                isStale: true
             ))
         }
 
         return Timeline(
-            entries: entries,
+            entries: dates.sorted().map { entry(for: selection, at: $0) },
             policy: .after(now.addingTimeInterval(fallbackInterval))
         )
     }
 
-    private func entry(
-        for configuration: ProviderWidgetConfiguration,
-        at date: Date
-    ) -> ProviderUsageEntry {
+    private func selection(for configuration: ProviderWidgetConfiguration) -> WidgetProviderSelection.Entry {
         let result = WidgetBridgeReader.load()
-        let selection = WidgetProviderSelection.entry(
+        return WidgetProviderSelection.entry(
             configuredID: configuration.provider?.id,
             bridgeStatus: result.status,
             in: result.document?.providers ?? []
         )
+    }
 
+    private func entry(for selection: WidgetProviderSelection.Entry, at date: Date) -> ProviderUsageEntry {
         let isStale: Bool = if case .provider(let provider) = selection {
             provider.refreshedAt.map {
                 date.timeIntervalSince($0) >= staleInterval
