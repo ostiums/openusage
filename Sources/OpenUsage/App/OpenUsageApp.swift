@@ -121,8 +121,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 /// The deliberately small URL surface exposed by widget cards.
-struct ProviderDeepLink: Equatable, Sendable {
-    let providerID: String
+enum ProviderDeepLink: Equatable, Sendable {
+    case provider(String)
+    case recovery
 
     static func parse(
         _ url: URL,
@@ -141,10 +142,11 @@ struct ProviderDeepLink: Equatable, Sendable {
               components.fragment == nil else { return nil }
 
         let pathComponents = components.path.split(separator: "/", omittingEmptySubsequences: true)
-        guard pathComponents.count == 1 else { return nil }
-        let providerID = String(pathComponents[0])
-        guard knownProviderIDs.contains(providerID) else { return nil }
-        return ProviderDeepLink(providerID: providerID)
+        guard pathComponents.count <= 1 else { return nil }
+        guard let component = pathComponents.first else { return .recovery }
+        let providerID = String(component)
+        guard knownProviderIDs.contains(providerID) else { return .recovery }
+        return .provider(providerID)
     }
 }
 

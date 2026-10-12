@@ -2,13 +2,6 @@ import Foundation
 import OpenUsageWidgetSupport
 import os
 
-enum WidgetBridgeReadStatus: Sendable {
-    case loaded
-    case missing
-    case corrupt
-    case unsupported
-}
-
 struct WidgetBridgeReadResult: Sendable {
     let status: WidgetBridgeReadStatus
     let document: WidgetPresentationDocument?

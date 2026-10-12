@@ -43,6 +43,81 @@ final class WidgetProviderSelectionTests: XCTestCase {
         )
         XCTAssertNil(WidgetProviderSelection.defaultProviderID(in: [WidgetProviderRecord]()))
     }
+
+    func testUnconfiguredWidgetReportsCorruptBridge() {
+        XCTAssertEqual(
+            WidgetProviderSelection.entry(
+                configuredID: nil, bridgeStatus: .corrupt, in: [WidgetProviderRecord]()
+            ),
+            .corruptData(nil)
+        )
+    }
+
+    func testUnconfiguredWidgetReportsUnsupportedBridge() {
+        XCTAssertEqual(
+            WidgetProviderSelection.entry(
+                configuredID: nil, bridgeStatus: .unsupported, in: [WidgetProviderRecord]()
+            ),
+            .unsupportedData(nil)
+        )
+    }
+
+    func testBridgeErrorsKeepConfiguredProviderID() {
+        let corrupt = WidgetProviderSelection.entry(
+            configuredID: "codex-2", bridgeStatus: .corrupt, in: [WidgetProviderRecord]()
+        )
+        let unsupported = WidgetProviderSelection.entry(
+            configuredID: "codex-2", bridgeStatus: .unsupported, in: [WidgetProviderRecord]()
+        )
+        XCTAssertEqual(corrupt, .corruptData("codex-2"))
+        XCTAssertEqual(unsupported, .unsupportedData("codex-2"))
+        XCTAssertEqual(corrupt.providerID, "codex-2")
+        XCTAssertEqual(unsupported.providerID, "codex-2")
+    }
+
+    func testMissingBridgeReportsMissingDataWithOrWithoutConfiguration() {
+        let empty = [WidgetProviderRecord]()
+        XCTAssertEqual(
+            WidgetProviderSelection.entry(configuredID: nil, bridgeStatus: .missing, in: empty),
+            .missingData(nil)
+        )
+        XCTAssertEqual(
+            WidgetProviderSelection.entry(configuredID: "codex-2", bridgeStatus: .missing, in: empty),
+            .missingData("codex-2")
+        )
+    }
+
+    func testLoadedBridgeUsesEnabledDefaultForUnconfiguredWidget() {
+        let selection = WidgetProviderSelection.entry(
+            configuredID: nil, bridgeStatus: .loaded, in: providers
+        )
+        XCTAssertEqual(selection, .provider(providers[1]))
+        XCTAssertEqual(selection.providerID, "codex")
+    }
+
+    func testLoadedBridgeKeepsConfiguredProviderEvenWhenDisabled() {
+        XCTAssertEqual(
+            WidgetProviderSelection.entry(configuredID: "claude", bridgeStatus: .loaded, in: providers),
+            .provider(providers[0])
+        )
+    }
+
+    func testLoadedBridgeReportsUnavailableConfiguredProvider() {
+        let selection = WidgetProviderSelection.entry(
+            configuredID: "claude-work", bridgeStatus: .loaded, in: providers
+        )
+        XCTAssertEqual(selection, .missingProvider("claude-work"))
+        XCTAssertEqual(selection.providerID, "claude-work")
+    }
+
+    func testLoadedEmptyBridgeReportsMissingDataForUnconfiguredWidget() {
+        XCTAssertEqual(
+            WidgetProviderSelection.entry(
+                configuredID: nil, bridgeStatus: .loaded, in: [WidgetProviderRecord]()
+            ),
+            .missingData(nil)
+        )
+    }
 }
 
 private func makeProvider(_ id: String, _ name: String, enabled: Bool) -> WidgetProviderRecord {

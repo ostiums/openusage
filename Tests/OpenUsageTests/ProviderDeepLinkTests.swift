@@ -2,7 +2,7 @@ import XCTest
 @testable import OpenUsage
 
 final class ProviderDeepLinkTests: XCTestCase {
-    private let knownProviderIDs: Set<String> = ["claude", "codex", "openrouter"]
+    private let knownProviderIDs: Set<String> = ["claude", "codex", "codex@active", "openrouter"]
 
     func testParsesReleaseAndDevelopmentProviderLinks() throws {
         XCTAssertEqual(
@@ -11,7 +11,7 @@ final class ProviderDeepLinkTests: XCTestCase {
                 expectedScheme: "openusage",
                 knownProviderIDs: knownProviderIDs
             ),
-            ProviderDeepLink(providerID: "claude")
+            .provider("claude")
         )
         XCTAssertEqual(
             ProviderDeepLink.parse(
@@ -19,19 +19,48 @@ final class ProviderDeepLinkTests: XCTestCase {
                 expectedScheme: "openusage-dev",
                 knownProviderIDs: knownProviderIDs
             ),
-            ProviderDeepLink(providerID: "openrouter")
+            .provider("openrouter")
         )
     }
 
-    func testRejectsUnknownProviderAndUnsupportedURLShapes() throws {
+    func testRoutesMissingAndRemovedProvidersToRecovery() throws {
+        for scheme in ["openusage", "openusage-dev"] {
+            for path in ["", "/", "/unknown", "/codex@removed"] {
+                XCTAssertEqual(
+                    ProviderDeepLink.parse(
+                        try XCTUnwrap(URL(string: "\(scheme)://provider\(path)")),
+                        expectedScheme: scheme,
+                        knownProviderIDs: knownProviderIDs
+                    ),
+                    .recovery,
+                    "Expected dashboard recovery for \(scheme)://provider\(path)"
+                )
+            }
+            XCTAssertEqual(
+                ProviderDeepLink.parse(
+                    try XCTUnwrap(URL(string: "\(scheme)://provider/codex@active")),
+                    expectedScheme: scheme,
+                    knownProviderIDs: knownProviderIDs
+                ),
+                .provider("codex@active"),
+                "An account still in the registry must retain its provider destination"
+            )
+        }
+    }
+
+    func testRejectsUnsupportedURLShapes() throws {
         let invalidURLs = [
             "https://provider/claude",
             "openusage://other/claude",
-            "openusage://provider/unknown",
             "openusage://provider/claude/extra",
+            "openusage://provider/unknown/extra",
             "openusage://provider/claude?source=widget",
             "openusage://provider/claude#fragment",
             "openusage://user@provider/claude",
+            "openusage://user:password@provider/claude",
+            "openusage://provider:123/claude",
+            "openusage://provider?source=widget",
+            "openusage://provider#fragment",
         ]
 
         for string in invalidURLs {

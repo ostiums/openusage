@@ -305,8 +305,9 @@ final class StatusItemController: NSObject {
     /// at least one visible metric open their expanded dashboard card; disabled providers (or enabled
     /// providers whose metrics are all hidden) open that provider's Customize detail instead.
     ///
-    /// The parser allow-lists against the live registry before the id reaches SwiftUI. Calling this
-    /// repeatedly while the panel is open is intentional: `requestDashboardProviderFocus` carries a
+    /// Missing or removed providers open the dashboard for recovery. The parser allow-lists against
+    /// the live registry before an id reaches SwiftUI. Calling this repeatedly while the panel is
+    /// open is intentional: `requestDashboardProviderFocus` carries a
     /// monotonically increasing token so even the same provider scrolls again.
     func openProviderDeepLink(_ url: URL) {
         guard let expectedScheme = Bundle.main.object(forInfoDictionaryKey: "OpenUsageURLScheme") as? String else {
@@ -323,7 +324,11 @@ final class StatusItemController: NSObject {
             return
         }
 
-        let providerID = deepLink.providerID
+        guard case .provider(let providerID) = deepLink else {
+            container.layout.screen = .dashboard
+            showPopover()
+            return
+        }
         let hasVisibleMetrics = !WidgetBridgeExporter.enabledMetricDescriptors(
             for: providerID,
             layout: container.layout,

@@ -17,7 +17,8 @@ on the metrics shown above the provider's expand caret; large widgets can also i
 
 Clicking a widget opens the OpenUsage popover at that provider. If the provider is off or has no enabled
 widget-compatible metrics (for example, only Usage Trend remains), it opens the provider's Customize
-screen instead.
+screen instead. If the widget has no provider to open or the chosen provider is no longer available,
+clicking it opens the dashboard so you can recover there.
 
 ## Updates and stale data
 
@@ -31,6 +32,9 @@ open the popover for the detailed error and recovery steps.
 
 If the chosen provider disappears from OpenUsage (for example, you sign out of a second account), the
 widget says **Provider Unavailable** instead of switching to a different provider.
+
+If the shared data cannot be read, the widget shows **Unable to Read Data**. If it requires a newer
+widget version, it shows **Update Required**. These messages also appear before a provider is selected.
 
 WidgetKit controls the exact moment a widget redraws, so a desktop widget can update later than the
 five-minute in-app refresh. OpenUsage requests a redraw when provider values change, while WidgetKit

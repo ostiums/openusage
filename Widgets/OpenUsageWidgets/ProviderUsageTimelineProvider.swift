@@ -66,37 +66,29 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
         at date: Date
     ) -> ProviderUsageEntry {
         let result = WidgetBridgeReader.load()
-        let selectedID = configuration.provider?.id
-            ?? result.document.flatMap { WidgetProviderSelection.defaultProviderID(in: $0.providers) }
+        let selection = WidgetProviderSelection.entry(
+            configuredID: configuration.provider?.id,
+            bridgeStatus: result.status,
+            in: result.document?.providers ?? []
+        )
 
-        guard let selectedID else {
-            return ProviderUsageEntry(date: date, state: .missingData, providerID: nil)
-        }
-
-        switch result.status {
-        case .missing:
-            return ProviderUsageEntry(date: date, state: .missingData, providerID: selectedID)
-        case .corrupt:
-            return ProviderUsageEntry(date: date, state: .corruptData, providerID: selectedID)
-        case .unsupported:
-            return ProviderUsageEntry(date: date, state: .unsupportedData, providerID: selectedID)
-        case .loaded:
-            guard let provider = result.document?.providers.first(where: { $0.id == selectedID }) else {
-                return ProviderUsageEntry(
-                    date: date,
-                    state: .missingProvider(selectedID),
-                    providerID: selectedID
-                )
-            }
+        let state: WidgetDisplayState
+        switch selection {
+        case .missingData:
+            state = .missingData
+        case .corruptData:
+            state = .corruptData
+        case .unsupportedData:
+            state = .unsupportedData
+        case .missingProvider(let id):
+            state = .missingProvider(id)
+        case .provider(let provider):
             let stale = provider.refreshedAt.map {
                 date.timeIntervalSince($0) >= staleInterval
             } ?? true
-            return ProviderUsageEntry(
-                date: date,
-                state: .provider(provider, isStale: stale),
-                providerID: selectedID
-            )
+            state = .provider(provider, isStale: stale)
         }
+        return ProviderUsageEntry(date: date, state: state, providerID: selection.providerID)
     }
 }
 
