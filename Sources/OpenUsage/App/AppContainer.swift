@@ -216,7 +216,6 @@ final class AppContainer {
         })
         let widgetBridgeCoordinator = WidgetBridgeCoordinator.makeDefault(
             exporter: WidgetBridgeExporter(
-                registry: registry,
                 layout: layout,
                 dataStore: dataStore,
                 enablement: enablement

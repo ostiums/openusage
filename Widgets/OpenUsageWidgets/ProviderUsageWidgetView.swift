@@ -1,3 +1,4 @@
+import OpenUsageWidgetSupport
 import SwiftUI
 import WidgetKit
 
@@ -8,18 +9,16 @@ struct ProviderUsageWidgetView: View {
 
     var body: some View {
         Group {
-            switch entry.state {
-            case .provider(let provider, let isStale):
+            switch entry.selection {
+            case .provider(let provider):
                 if !provider.isEnabled {
                     WidgetMessageView(
-                        providerID: provider.id,
                         title: "Provider Disabled",
                         message: "Enable \(provider.displayName) in OpenUsage to show its metrics.",
                         symbol: "slider.horizontal.3"
                     )
                 } else if provider.health == .noData || selectedMetrics(for: provider).isEmpty {
                     WidgetMessageView(
-                        providerID: provider.id,
                         title: "No Data",
                         message: "Open OpenUsage to refresh \(provider.displayName).",
                         symbol: "chart.bar.xaxis"
@@ -28,46 +27,42 @@ struct ProviderUsageWidgetView: View {
                     ProviderContentView(
                         provider: provider,
                         metrics: selectedMetrics(for: provider),
-                        isStale: isStale,
+                        isStale: entry.isStale,
                         family: family
                     )
                 }
             case .missingData:
                 WidgetMessageView(
-                    providerID: entry.providerID,
                     title: "Open OpenUsage",
                     message: "Launch the app once to make usage available.",
                     symbol: "arrow.up.forward.app"
                 )
             case .corruptData:
                 WidgetMessageView(
-                    providerID: entry.providerID,
                     title: "Unable to Read Data",
                     message: "Open OpenUsage to refresh the widget.",
                     symbol: "exclamationmark.triangle"
                 )
             case .unsupportedData:
                 WidgetMessageView(
-                    providerID: entry.providerID,
                     title: "Update Required",
                     message: "Update OpenUsage to refresh this widget.",
                     symbol: "arrow.triangle.2.circlepath"
                 )
-            case .missingProvider(let providerID):
+            case .missingProvider:
                 WidgetMessageView(
-                    providerID: providerID,
                     title: "Provider Unavailable",
                     message: "Choose another provider or open OpenUsage.",
                     symbol: "questionmark.app"
                 )
             }
         }
-        .widgetURL(WidgetHostURL.provider(entry.providerID))
+        .widgetURL(WidgetHostURL.provider(entry.selection.providerID))
     }
 
-    private func selectedMetrics(for provider: WidgetProviderContent) -> [WidgetMetricContent] {
-        let primary = provider.primaryMetrics.filter { $0.hasData && $0.kind != .chart }
-        let secondary = provider.secondaryMetrics.filter { $0.hasData && $0.kind != .chart }
+    private func selectedMetrics(for provider: WidgetProviderRecord) -> [WidgetMetricRecord] {
+        let primary = provider.primaryMetrics.filter(\.hasData)
+        let secondary = provider.secondaryMetrics.filter(\.hasData)
 
         switch family {
         case .systemSmall:
@@ -85,8 +80,8 @@ struct ProviderUsageWidgetView: View {
 }
 
 private struct ProviderContentView: View {
-    let provider: WidgetProviderContent
-    let metrics: [WidgetMetricContent]
+    let provider: WidgetProviderRecord
+    let metrics: [WidgetMetricRecord]
     let isStale: Bool
     let family: WidgetFamily
 
@@ -117,42 +112,22 @@ private struct ProviderContentView: View {
 }
 
 private struct ProviderWidgetHeader: View {
-    let provider: WidgetProviderContent
+    let provider: WidgetProviderRecord
     let isStale: Bool
     let compact: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            ProviderIconView(iconID: provider.iconID)
+            ProviderIconView(iconID: provider.iconID ?? provider.id)
                 .frame(width: 19, height: 19)
 
             if compact {
-                HStack(spacing: 5) {
-                    Text(provider.displayName)
-                        .font(.headline)
-                        .lineLimit(1)
-                    if let plan = provider.plan, !plan.isEmpty {
-                        Text(plan)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
+                providerTitle
                 Spacer(minLength: 0)
                 compactStatus
             } else {
                 VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 5) {
-                        Text(provider.displayName)
-                            .font(.headline)
-                            .lineLimit(1)
-                        if let plan = provider.plan, !plan.isEmpty {
-                            Text(plan)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
+                    providerTitle
 
                     detailedStatus
                         .font(.caption2)
@@ -163,34 +138,43 @@ private struct ProviderWidgetHeader: View {
         }
     }
 
+    private var providerTitle: some View {
+        HStack(spacing: 5) {
+            Text(provider.displayName)
+                .font(.headline)
+                .lineLimit(1)
+            if let plan = provider.plan, !plan.isEmpty {
+                Text(plan)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var status: (title: LocalizedStringKey, symbol: String, color: Color)? {
+        switch (provider.health, isStale) {
+        case (.failed, _): ("Refresh Failed", "exclamationmark.circle.fill", .red)
+        case (.warning, _): ("Warning", "exclamationmark.triangle.fill", .orange)
+        case (_, true): ("Outdated", "clock.badge.exclamationmark", .orange)
+        default: nil
+        }
+    }
+
     @ViewBuilder
     private var compactStatus: some View {
-        if provider.health == .failed {
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.red)
-                .accessibilityLabel("Refresh Failed")
-        } else if provider.health == .warning {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .accessibilityLabel("Warning")
-        } else if isStale {
-            Image(systemName: "clock.badge.exclamationmark")
-                .foregroundStyle(.orange)
-                .accessibilityLabel("Outdated")
+        if let status {
+            Image(systemName: status.symbol)
+                .foregroundStyle(status.color)
+                .accessibilityLabel(Text(status.title))
         }
     }
 
     @ViewBuilder
     private var detailedStatus: some View {
-        if provider.health == .failed {
-            Label("Refresh Failed", systemImage: "exclamationmark.circle.fill")
-                .foregroundStyle(.red)
-        } else if provider.health == .warning {
-            Label("Warning", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-        } else if isStale {
-            Label("Outdated", systemImage: "clock.badge.exclamationmark")
-                .foregroundStyle(.orange)
+        if let status {
+            Label(status.title, systemImage: status.symbol)
+                .foregroundStyle(status.color)
         } else if let refreshedAt = provider.refreshedAt {
             HStack(spacing: 2) {
                 Text("Updated")
@@ -202,7 +186,7 @@ private struct ProviderWidgetHeader: View {
 }
 
 private struct WidgetMetricView: View {
-    let metric: WidgetMetricContent
+    let metric: WidgetMetricRecord
     let compact: Bool
 
     var body: some View {
@@ -273,7 +257,6 @@ private struct WidgetMetricView: View {
 }
 
 private struct WidgetMessageView: View {
-    let providerID: String?
     let title: String
     let message: String
     let symbol: String

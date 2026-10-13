@@ -86,7 +86,8 @@ ordered `WidgetData` used by the dashboard into a small, versioned document cont
 rows and no credentials or detailed errors. It atomically writes that document to an App Group file and
 asks WidgetKit to reload only when the semantic content changed.
 
-The sandboxed extension reads that file to render one configured provider. It never imports provider
+The host and sandboxed extension share the document's display-ready provider and metric types. The
+extension renders those records directly for one configured provider. It never imports provider
 runtimes, scans local logs, refreshes tokens, or calls provider APIs. If the host stops, the extension
 keeps the last good document and marks it outdated.
 

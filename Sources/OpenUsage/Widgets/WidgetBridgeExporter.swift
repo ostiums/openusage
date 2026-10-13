@@ -3,7 +3,6 @@ import OpenUsageWidgetSupport
 
 @MainActor
 struct WidgetBridgeExporter {
-    let registry: WidgetRegistry
     let layout: LayoutStore
     let dataStore: WidgetDataStore
     let enablement: ProviderEnablementStore

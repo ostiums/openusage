@@ -5,13 +5,13 @@ import WidgetKit
 
 struct ProviderUsageEntry: TimelineEntry {
     let date: Date
-    let state: WidgetDisplayState
-    let providerID: String?
+    let selection: WidgetProviderSelection.Entry
+    let isStale: Bool
 
     static let placeholder = ProviderUsageEntry(
         date: .now,
-        state: .provider(.placeholder, isStale: false),
-        providerID: "claude"
+        selection: .provider(.placeholder),
+        isStale: false
     )
 }
 
@@ -42,7 +42,8 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
         let current = entry(for: configuration, at: now)
         var entries = [current]
 
-        if case .provider(let provider, isStale: false) = current.state,
+        if case .provider(let provider) = current.selection,
+           !current.isStale,
            let refreshedAt = provider.refreshedAt {
             let staleAt = max(
                 refreshedAt.addingTimeInterval(staleInterval),
@@ -50,8 +51,8 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
             )
             entries.append(ProviderUsageEntry(
                 date: staleAt,
-                state: .provider(provider, isStale: true),
-                providerID: provider.id
+                selection: current.selection,
+                isStale: true
             ))
         }
 
@@ -72,28 +73,19 @@ struct ProviderUsageTimelineProvider: AppIntentTimelineProvider {
             in: result.document?.providers ?? []
         )
 
-        let state: WidgetDisplayState
-        switch selection {
-        case .missingData:
-            state = .missingData
-        case .corruptData:
-            state = .corruptData
-        case .unsupportedData:
-            state = .unsupportedData
-        case .missingProvider(let id):
-            state = .missingProvider(id)
-        case .provider(let provider):
-            let stale = provider.refreshedAt.map {
+        let isStale: Bool = if case .provider(let provider) = selection {
+            provider.refreshedAt.map {
                 date.timeIntervalSince($0) >= staleInterval
             } ?? true
-            state = .provider(provider, isStale: stale)
+        } else {
+            false
         }
-        return ProviderUsageEntry(date: date, state: state, providerID: selection.providerID)
+        return ProviderUsageEntry(date: date, selection: selection, isStale: isStale)
     }
 }
 
-extension WidgetProviderContent {
-    static let placeholder = WidgetProviderContent(
+extension WidgetProviderRecord {
+    static let placeholder = WidgetProviderRecord(
         id: "claude",
         displayName: "Claude",
         iconID: "claude",
@@ -102,7 +94,7 @@ extension WidgetProviderContent {
         refreshedAt: .now,
         health: .ready,
         primaryMetrics: [
-            WidgetMetricContent(
+            WidgetMetricRecord(
                 id: "session",
                 title: "Session",
                 kind: .progress,
@@ -113,7 +105,7 @@ extension WidgetProviderContent {
                 severity: .normal,
                 hasData: true
             ),
-            WidgetMetricContent(
+            WidgetMetricRecord(
                 id: "weekly",
                 title: "Weekly",
                 kind: .progress,

@@ -8,7 +8,6 @@
 /* Begin PBXBuildFile section */
 		100000000000000000000001 /* OpenUsageWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* OpenUsageWidgets.swift */; };
 		100000000000000000000002 /* ProviderWidgetConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* ProviderWidgetConfiguration.swift */; };
-		100000000000000000000003 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* WidgetPresentation.swift */; };
 		100000000000000000000004 /* ProviderUsageTimelineProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* ProviderUsageTimelineProvider.swift */; };
 		100000000000000000000005 /* WidgetBridgeReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* WidgetBridgeReader.swift */; };
 		100000000000000000000006 /* ProviderIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000006 /* ProviderIconView.swift */; };
@@ -20,7 +19,6 @@
 /* Begin PBXFileReference section */
 		200000000000000000000001 /* OpenUsageWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenUsageWidgets.swift; sourceTree = "<group>"; };
 		200000000000000000000002 /* ProviderWidgetConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderWidgetConfiguration.swift; sourceTree = "<group>"; };
-		200000000000000000000003 /* WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPresentation.swift; sourceTree = "<group>"; };
 		200000000000000000000004 /* ProviderUsageTimelineProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderUsageTimelineProvider.swift; sourceTree = "<group>"; };
 		200000000000000000000005 /* WidgetBridgeReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetBridgeReader.swift; sourceTree = "<group>"; };
 		200000000000000000000006 /* ProviderIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderIconView.swift; sourceTree = "<group>"; };
@@ -55,7 +53,6 @@
 			children = (
 				200000000000000000000001 /* OpenUsageWidgets.swift */,
 				200000000000000000000002 /* ProviderWidgetConfiguration.swift */,
-				200000000000000000000003 /* WidgetPresentation.swift */,
 				200000000000000000000004 /* ProviderUsageTimelineProvider.swift */,
 				200000000000000000000005 /* WidgetBridgeReader.swift */,
 				200000000000000000000006 /* ProviderIconView.swift */,
@@ -134,7 +131,6 @@
 			files = (
 				100000000000000000000001 /* OpenUsageWidgets.swift in Sources */,
 				100000000000000000000002 /* ProviderWidgetConfiguration.swift in Sources */,
-				100000000000000000000003 /* WidgetPresentation.swift in Sources */,
 				100000000000000000000004 /* ProviderUsageTimelineProvider.swift in Sources */,
 				100000000000000000000005 /* WidgetBridgeReader.swift in Sources */,
 				100000000000000000000006 /* ProviderIconView.swift in Sources */,

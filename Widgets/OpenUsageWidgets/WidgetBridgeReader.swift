@@ -4,11 +4,7 @@ import os
 
 struct WidgetBridgeReadResult: Sendable {
     let status: WidgetBridgeReadStatus
-    let document: WidgetPresentationDocument?
-}
-
-struct WidgetPresentationDocument: Sendable {
-    let providers: [WidgetProviderContent]
+    let document: WidgetBridgeDocument?
 }
 
 enum WidgetBridgeReader {
@@ -37,12 +33,7 @@ enum WidgetBridgeReader {
             ).read() else {
                 return WidgetBridgeReadResult(status: .missing, document: nil)
             }
-            return WidgetBridgeReadResult(
-                status: .loaded,
-                document: WidgetPresentationDocument(
-                    providers: document.providers.map(WidgetProviderContent.init)
-                )
-            )
+            return WidgetBridgeReadResult(status: .loaded, document: document)
         } catch WidgetBridgeFileError.unsupportedSchema(let version) {
             logger.error("Unsupported widget bridge schema: \(version)")
             return WidgetBridgeReadResult(status: .unsupported, document: nil)
@@ -50,37 +41,5 @@ enum WidgetBridgeReader {
             logger.error("Widget bridge read failed: \(error.localizedDescription, privacy: .public)")
             return WidgetBridgeReadResult(status: .corrupt, document: nil)
         }
-    }
-}
-
-private extension WidgetProviderContent {
-    init(_ record: WidgetProviderRecord) {
-        self.init(
-            id: record.id,
-            displayName: record.displayName,
-            iconID: record.iconID ?? record.id,
-            isEnabled: record.isEnabled,
-            plan: record.plan,
-            refreshedAt: record.refreshedAt,
-            health: Health(rawValue: record.health.rawValue) ?? .noData,
-            primaryMetrics: record.primaryMetrics.map(WidgetMetricContent.init),
-            secondaryMetrics: record.secondaryMetrics.map(WidgetMetricContent.init)
-        )
-    }
-}
-
-private extension WidgetMetricContent {
-    init(_ record: WidgetMetricRecord) {
-        self.init(
-            id: record.id,
-            title: record.title,
-            kind: Kind(rawValue: record.kind.rawValue) ?? .status,
-            headline: record.headline,
-            detail: record.detail,
-            progressFraction: record.progressFraction,
-            resetAt: record.resetAt,
-            severity: Severity(rawValue: record.severity.rawValue) ?? .neutral,
-            hasData: record.hasData
-        )
     }
 }

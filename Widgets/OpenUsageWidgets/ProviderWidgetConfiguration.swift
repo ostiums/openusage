@@ -42,13 +42,13 @@ struct WidgetProviderEntityQuery: EntityQuery, EnumerableEntityQuery {
         WidgetProviderSelection.suggested(in: Self.providers()).map(WidgetProviderEntity.init)
     }
 
-    private static func providers() -> [WidgetProviderContent] {
+    private static func providers() -> [WidgetProviderRecord] {
         WidgetBridgeReader.load().document?.providers ?? []
     }
 }
 
 private extension WidgetProviderEntity {
-    init(_ provider: WidgetProviderContent) {
+    init(_ provider: WidgetProviderRecord) {
         self.init(id: provider.id, name: provider.displayName)
     }
 }

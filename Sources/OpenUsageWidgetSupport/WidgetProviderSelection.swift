@@ -1,15 +1,5 @@
 import Foundation
 
-/// A provider as the widget picker and timeline see it. Both the bridge record and the extension's
-/// presentation model conform, so the selection rules below are shared and unit-tested here.
-public protocol WidgetSelectableProvider {
-    var id: String { get }
-    var displayName: String { get }
-    var isEnabled: Bool { get }
-}
-
-extension WidgetProviderRecord: WidgetSelectableProvider {}
-
 public enum WidgetBridgeReadStatus: Sendable {
     case loaded
     case missing
@@ -30,8 +20,8 @@ public enum WidgetProviderSelection {
         }
     }
 
-    public enum Entry<Provider: WidgetSelectableProvider> {
-        case provider(Provider)
+    public enum Entry: Equatable, Sendable {
+        case provider(WidgetProviderRecord)
         case missingData(String?)
         case corruptData(String?)
         case unsupportedData(String?)
@@ -48,11 +38,11 @@ public enum WidgetProviderSelection {
 
     /// Bridge errors take precedence even before a widget has a saved provider. Only a loaded bridge
     /// can choose the default provider or report that the saved provider is no longer exported.
-    public static func entry<P: WidgetSelectableProvider>(
+    public static func entry(
         configuredID: String?,
         bridgeStatus: WidgetBridgeReadStatus,
-        in providers: [P]
-    ) -> Entry<P> {
+        in providers: [WidgetProviderRecord]
+    ) -> Entry {
         switch bridgeStatus {
         case .missing:
             return .missingData(configuredID)
@@ -76,7 +66,7 @@ public enum WidgetProviderSelection {
     /// silently switching to another provider.
     public static func resolve(
         _ ids: [String],
-        in providers: [some WidgetSelectableProvider]
+        in providers: [WidgetProviderRecord]
     ) -> [Option] {
         ids.map { id in
             Option(id: id, name: providers.first { $0.id == id }?.displayName ?? id)
@@ -84,16 +74,13 @@ public enum WidgetProviderSelection {
     }
 
     /// Enabled providers first; every exported provider when none is enabled.
-    public static func suggested<P: WidgetSelectableProvider>(in providers: [P]) -> [P] {
+    public static func suggested(in providers: [WidgetProviderRecord]) -> [WidgetProviderRecord] {
         let enabled = providers.filter(\.isEnabled)
         return enabled.isEmpty ? providers : enabled
     }
 
     /// The provider an unconfigured widget shows.
-    public static func defaultProviderID(in providers: [some WidgetSelectableProvider]) -> String? {
+    public static func defaultProviderID(in providers: [WidgetProviderRecord]) -> String? {
         suggested(in: providers).first?.id
     }
 }
-
-extension WidgetProviderSelection.Entry: Equatable where Provider: Equatable {}
-extension WidgetProviderSelection.Entry: Sendable where Provider: Sendable {}

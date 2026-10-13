@@ -208,7 +208,7 @@ private final class Fixture {
     let snapshot: ProviderSnapshot
 
     var exporter: WidgetBridgeExporter {
-        WidgetBridgeExporter(registry: registry, layout: layout, dataStore: dataStore, enablement: enablement)
+        WidgetBridgeExporter(layout: layout, dataStore: dataStore, enablement: enablement)
     }
 
     init(enabled: Bool = true) {

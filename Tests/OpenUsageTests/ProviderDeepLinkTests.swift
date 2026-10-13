@@ -5,20 +5,9 @@ final class ProviderDeepLinkTests: XCTestCase {
     private let knownProviderIDs: Set<String> = ["claude", "codex", "codex@active", "openrouter"]
 
     func testParsesReleaseAndDevelopmentProviderLinks() throws {
+        XCTAssertEqual(try parse("openusage://provider/claude"), .provider("claude"))
         XCTAssertEqual(
-            ProviderDeepLink.parse(
-                try XCTUnwrap(URL(string: "openusage://provider/claude")),
-                expectedScheme: "openusage",
-                knownProviderIDs: knownProviderIDs
-            ),
-            .provider("claude")
-        )
-        XCTAssertEqual(
-            ProviderDeepLink.parse(
-                try XCTUnwrap(URL(string: "openusage-dev://provider/openrouter")),
-                expectedScheme: "openusage-dev",
-                knownProviderIDs: knownProviderIDs
-            ),
+            try parse("openusage-dev://provider/openrouter", scheme: "openusage-dev"),
             .provider("openrouter")
         )
     }
@@ -27,21 +16,13 @@ final class ProviderDeepLinkTests: XCTestCase {
         for scheme in ["openusage", "openusage-dev"] {
             for path in ["", "/", "/unknown", "/codex@removed"] {
                 XCTAssertEqual(
-                    ProviderDeepLink.parse(
-                        try XCTUnwrap(URL(string: "\(scheme)://provider\(path)")),
-                        expectedScheme: scheme,
-                        knownProviderIDs: knownProviderIDs
-                    ),
+                    try parse("\(scheme)://provider\(path)", scheme: scheme),
                     .recovery,
                     "Expected dashboard recovery for \(scheme)://provider\(path)"
                 )
             }
             XCTAssertEqual(
-                ProviderDeepLink.parse(
-                    try XCTUnwrap(URL(string: "\(scheme)://provider/codex@active")),
-                    expectedScheme: scheme,
-                    knownProviderIDs: knownProviderIDs
-                ),
+                try parse("\(scheme)://provider/codex@active", scheme: scheme),
                 .provider("codex@active"),
                 "An account still in the registry must retain its provider destination"
             )
@@ -64,42 +45,18 @@ final class ProviderDeepLinkTests: XCTestCase {
         ]
 
         for string in invalidURLs {
-            let url = try XCTUnwrap(URL(string: string))
-            XCTAssertNil(
-                ProviderDeepLink.parse(
-                    url,
-                    expectedScheme: "openusage",
-                    knownProviderIDs: knownProviderIDs
-                ),
-                "Expected rejection for \(string)"
-            )
+            XCTAssertNil(try parse(string), "Expected rejection for \(string)")
         }
     }
 
     func testRejectsOtherBuildScheme() throws {
-        XCTAssertNil(
-            ProviderDeepLink.parse(
-                try XCTUnwrap(URL(string: "openusage-dev://provider/claude")),
-                expectedScheme: "openusage",
-                knownProviderIDs: knownProviderIDs
-            )
-        )
-        XCTAssertNil(
-            ProviderDeepLink.parse(
-                try XCTUnwrap(URL(string: "openusage://provider/claude")),
-                expectedScheme: "openusage-dev",
-                knownProviderIDs: knownProviderIDs
-            )
-        )
+        XCTAssertNil(try parse("openusage-dev://provider/claude"))
+        XCTAssertNil(try parse("openusage://provider/claude", scheme: "openusage-dev"))
     }
 
     func testRejectsUnexpectedConfiguredScheme() throws {
         XCTAssertNil(
-            ProviderDeepLink.parse(
-                try XCTUnwrap(URL(string: "https://provider/claude")),
-                expectedScheme: "https",
-                knownProviderIDs: knownProviderIDs
-            ),
+            try parse("https://provider/claude", scheme: "https"),
             "Only the two declared OpenUsage scheme values are valid"
         )
     }
@@ -164,48 +121,47 @@ final class ProviderDeepLinkTests: XCTestCase {
 
     @MainActor
     func testDashboardFocusRequestValidatesAndRepeatsKnownProvider() {
-        let suite = "OpenUsageTests.ProviderDeepLink.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let store = LayoutStore(
-            registry: .mock,
-            defaults: defaults,
-            storageKey: "layout",
-            defaultMetricIDs: []
-        )
+        withLayoutStore { store in
+            XCTAssertFalse(store.requestDashboardProviderFocus("unknown"))
+            XCTAssertNil(store.dashboardFocusProviderID)
+            XCTAssertEqual(store.dashboardFocusRequestID, 0)
 
-        XCTAssertFalse(store.requestDashboardProviderFocus("unknown"))
-        XCTAssertNil(store.dashboardFocusProviderID)
-        XCTAssertEqual(store.dashboardFocusRequestID, 0)
+            XCTAssertTrue(store.requestDashboardProviderFocus("claude"))
+            XCTAssertEqual(store.dashboardFocusProviderID, "claude")
+            XCTAssertEqual(store.dashboardFocusRequestID, 1)
 
-        XCTAssertTrue(store.requestDashboardProviderFocus("claude"))
-        XCTAssertEqual(store.dashboardFocusProviderID, "claude")
-        XCTAssertEqual(store.dashboardFocusRequestID, 1)
-
-        XCTAssertTrue(store.requestDashboardProviderFocus("claude"))
-        XCTAssertEqual(store.dashboardFocusRequestID, 2, "same-provider links must retrigger scrolling")
+            XCTAssertTrue(store.requestDashboardProviderFocus("claude"))
+            XCTAssertEqual(store.dashboardFocusRequestID, 2, "same-provider links must retrigger scrolling")
+        }
     }
 
     @MainActor
     func testDashboardFocusAcknowledgementOnlyClearsMatchingRequest() {
+        withLayoutStore { store in
+            XCTAssertTrue(store.requestDashboardProviderFocus("claude"))
+            let firstRequestID = store.dashboardFocusRequestID
+            XCTAssertTrue(store.requestDashboardProviderFocus("codex"))
+
+            store.acknowledgeDashboardProviderFocus(requestID: firstRequestID)
+            XCTAssertEqual(store.dashboardFocusProviderID, "codex", "an older callback must preserve a newer request")
+
+            store.acknowledgeDashboardProviderFocus(requestID: store.dashboardFocusRequestID)
+            XCTAssertNil(store.dashboardFocusProviderID, "a handled request must not replay when the dashboard remounts")
+        }
+    }
+
+    private func parse(_ string: String, scheme: String = "openusage") throws -> ProviderDeepLink? {
+        ProviderDeepLink.parse(
+            try XCTUnwrap(URL(string: string)), expectedScheme: scheme, knownProviderIDs: knownProviderIDs
+        )
+    }
+
+    @MainActor
+    private func withLayoutStore(_ assertions: (LayoutStore) -> Void) {
         let suite = "OpenUsageTests.ProviderDeepLink.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let store = LayoutStore(
-            registry: .mock,
-            defaults: defaults,
-            storageKey: "layout",
-            defaultMetricIDs: []
-        )
-
-        XCTAssertTrue(store.requestDashboardProviderFocus("claude"))
-        let firstRequestID = store.dashboardFocusRequestID
-        XCTAssertTrue(store.requestDashboardProviderFocus("codex"))
-
-        store.acknowledgeDashboardProviderFocus(requestID: firstRequestID)
-        XCTAssertEqual(store.dashboardFocusProviderID, "codex", "an older callback must preserve a newer request")
-
-        store.acknowledgeDashboardProviderFocus(requestID: store.dashboardFocusRequestID)
-        XCTAssertNil(store.dashboardFocusProviderID, "a handled request must not replay when the dashboard remounts")
+        let store = LayoutStore(registry: .mock, defaults: defaults, storageKey: "layout", defaultMetricIDs: [])
+        assertions(store)
     }
 }
