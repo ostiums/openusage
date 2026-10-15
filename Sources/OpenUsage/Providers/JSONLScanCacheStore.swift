@@ -67,12 +67,21 @@ struct JSONLScanCacheRecord<Item: Codable & Sendable>: Codable, Sendable {
     var size: Int
     var mtime: Date
     var items: [Item]
+    /// Byte offset just past the last parsed newline, when append-only resume is safe.
+    var parsedOffset: Int? = nil
+    /// Opaque provider parser state at `parsedOffset`.
+    var resumeState: Data? = nil
+    /// Fingerprint of the trailing bytes immediately before `parsedOffset`.
+    var tailFingerprint: Int64? = nil
 }
 
 struct JSONLScanCachedFile<Item: Codable & Sendable>: Sendable {
     var size: Int
     var mtime: Date
     var items: [Item]
+    var parsedOffset: Int? = nil
+    var resumeState: Data? = nil
+    var tailFingerprint: Int64? = nil
 }
 
 struct JSONLScanCacheReadSnapshot<Item: Codable & Sendable>: Sendable {
@@ -82,7 +91,7 @@ struct JSONLScanCacheReadSnapshot<Item: Codable & Sendable>: Sendable {
 }
 
 enum JSONLScanCachePaths {
-    static let formatVersion = 1
+    static let formatVersion = 2
     static let staleIdentityRetention: TimeInterval = 35 * 86_400
 
     static var defaultDirectory: URL {
@@ -296,7 +305,10 @@ actor JSONLScanCacheWriter {
                     files[path] = JSONLScanCachedFile(
                         size: record.size,
                         mtime: record.mtime,
-                        items: record.items
+                        items: record.items,
+                        parsedOffset: record.parsedOffset,
+                        resumeState: record.resumeState,
+                        tailFingerprint: record.tailFingerprint
                     )
                 }
             }

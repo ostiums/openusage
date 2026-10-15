@@ -79,7 +79,7 @@ actor CodexLogUsageScanner {
     /// once. The version is the parser schema version; bump it when `Event` semantics change.
     private static let sharedScanner = IncrementalJSONLScanner<Event>(
         logTag: LogTag.plugin("codex"),
-        persistence: JSONLScanCachePersistence(namespace: "codex", schemaVersion: 6)
+        persistence: JSONLScanCachePersistence(namespace: "codex", schemaVersion: 7)
     )
 
     static func flushPersistentCacheWrites() async {
@@ -118,7 +118,7 @@ actor CodexLogUsageScanner {
         let files = Self.sessionFiles(homes: homes.read, foreignHomes: homes.foreign)
         guard !files.isEmpty else {
             _ = await scanner.items(
-                from: [], since: since, cacheIdentity: identity, parse: Self.parseFile
+                from: [], since: since, cacheIdentity: identity, tailParser: Self.tailParser
             )
             return nil
         }
@@ -127,8 +127,7 @@ actor CodexLogUsageScanner {
             from: files,
             since: since,
             cacheIdentity: identity,
-            initialState: CodexLogFileParser(),
-            parse: { data, state in state.parse(data) }
+            tailParser: Self.tailParser
         ), !Task.isCancelled else { return nil }
         return Self.aggregate(events: events, since: since, pricing: pricing, fallbackModel: fallbackModel)
     }
@@ -202,6 +201,16 @@ actor CodexLogUsageScanner {
 
     // MARK: - File parsing
 
+    static let tailParser = JSONLTailParser<Event>.stateful(
+        initial: CodexLogFileParser.ParseState(),
+        parse: { chunk, state in
+            var parser = CodexLogFileParser(state: state)
+            let events = parser.parse(chunk)
+            state = parser.state
+            return events
+        }
+    )
+
     /// Parse one rollout file: track the current model from `turn_context` and the current service
     /// tier from `thread_settings_applied`, normalize each `token_count` into a delta event, and
     /// skip a child session's replayed parent history (everything before the first live
@@ -213,7 +222,7 @@ actor CodexLogUsageScanner {
 
     /// Token fields of a `token_count` usage object, tolerating the older field spellings ccusage
     /// accepts (`prompt_tokens`, `completion_tokens`, `cache_read_input_tokens`, …).
-    struct RawUsage: Sendable {
+    struct RawUsage: Codable, Sendable, Equatable {
         var input: Int
         var cached: Int
         var output: Int

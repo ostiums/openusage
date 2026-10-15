@@ -55,8 +55,11 @@ section. See [Logging](logging.md) for the levels, subsystem tags, and the never
 ## Account log lines
 
 The launch-time account pass (which account is signed in at the Claude/Codex default home) leaves a
-short trail in the log file:
+short trail in the log file. Its filesystem and Keychain reads run in parallel off the main actor;
+account reconciliation stays on the main actor. Adapted from Runway (mstallone/runway) #48, MIT.
 
+- `account assembly duration: <n> ms` — elapsed time for launch-time account discovery and assembly.
+- `launch to status item ready: <n> ms` — elapsed time from app process start to status-item initialization.
 - `accounts: claude default identity resolved (claude@<hash>)` — the default login named its account.
   The hash is derived from the account id, so two launches by the same account always match.
 - `accounts: codex default identity unresolved — …` — a login exists but its account can't be named

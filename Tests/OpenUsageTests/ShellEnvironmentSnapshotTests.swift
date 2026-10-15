@@ -177,6 +177,39 @@ final class ShellEnvironmentSnapshotTests: XCTestCase {
         XCTAssertEqual(reader.value(for: "CODEX_HOME"), "/tmp/live")
     }
 
+    func testNonblockingReaderUsesOnlyCachedShellValuesOffMainThread() async {
+        let cold = LoginShellEnvironment(runner: FixedRunner(
+            stdout: ["__OPENUSAGE_ENV_BEGIN__", "CODEX_HOME=/tmp/live", "__OPENUSAGE_ENV_END__"].joined(separator: "\0")
+        ))
+        let reader = ProcessEnvironmentReader(
+            processEnvironment: [:],
+            shellEnvironment: cold,
+            launchSnapshot: { nil },
+            blocksOnShellCapture: false
+        )
+
+        let value = await Task.detached {
+            reader.value(for: "CODEX_HOME")
+        }.value
+
+        XCTAssertNil(value)
+        XCTAssertFalse(cold.capturedSuccessfully)
+    }
+
+    func testNonblockingReaderUsesAnExistingShellCapture() {
+        let stdout = ["__OPENUSAGE_ENV_BEGIN__", "CODEX_HOME=/tmp/live", "__OPENUSAGE_ENV_END__"].joined(separator: "\0")
+        let warm = LoginShellEnvironment(runner: FixedRunner(stdout: stdout))
+        XCTAssertTrue(warm.ensureCapturedForTesting())
+        let reader = ProcessEnvironmentReader(
+            processEnvironment: [:],
+            shellEnvironment: warm,
+            launchSnapshot: { nil },
+            blocksOnShellCapture: false
+        )
+
+        XCTAssertEqual(reader.value(for: "CODEX_HOME"), "/tmp/live")
+    }
+
     private func makeScratchDefaults() -> UserDefaults {
         let suiteName = "OpenUsageTests.ShellEnvironmentSnapshot.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

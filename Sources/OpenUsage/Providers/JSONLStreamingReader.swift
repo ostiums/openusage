@@ -6,18 +6,30 @@ enum JSONLStreamingReader {
     static let readChunkBytes = 64 * 1024
     static let maximumRecordBytes = 1024 * 1024
 
-    struct Result<Item: Sendable>: Sendable {
+    struct Result<Item: Sendable, State: Sendable>: Sendable {
         var items: [Item]?
+        var state: State
         var oversizedRecordCount: Int
+        var parsedOffset: Int
+        var endsAtLineBoundary: Bool
     }
 
     static func read<Item: Sendable, State: Sendable>(
         path: String,
+        startingAt: Int = 0,
+        upTo: Int? = nil,
         initialState: State,
         parse: @Sendable (Data, inout State) -> [Item]?
-    ) throws -> Result<Item> {
+    ) throws -> Result<Item, State> {
+        precondition(startingAt >= 0)
+        if let upTo {
+            precondition(upTo >= startingAt)
+        }
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
         defer { try? handle.close() }
+        if startingAt > 0 {
+            try handle.seek(toOffset: UInt64(startingAt))
+        }
 
         var state = initialState
         var items: [Item] = []
@@ -26,6 +38,9 @@ enum JSONLStreamingReader {
         var oversizedRecordCount = 0
         var discardingOversizedRecord = false
         var readAnyBytes = false
+        var streamOffset = startingAt
+        var parsedOffset = startingAt
+        var endsAtLineBoundary = true
 
         func flushBatch() throws -> Bool {
             guard !batch.isEmpty else { return true }
@@ -59,7 +74,11 @@ enum JSONLStreamingReader {
 
         while true {
             try Task.checkCancellation()
-            guard let chunk = try handle.read(upToCount: readChunkBytes), !chunk.isEmpty else { break }
+            let readCount = upTo.map { min(readChunkBytes, max(0, $0 - streamOffset)) } ?? readChunkBytes
+            guard readCount > 0,
+                  let chunk = try handle.read(upToCount: readCount),
+                  !chunk.isEmpty
+            else { break }
             readAnyBytes = true
 
             var offset = chunk.startIndex
@@ -67,6 +86,7 @@ enum JSONLStreamingReader {
                 let newline = chunk[offset..<chunk.endIndex].firstIndex(of: UInt8(ascii: "\n"))
                 let end = newline ?? chunk.endIndex
                 let fragment = chunk[offset..<end]
+                let fragmentCount = fragment.count
 
                 if !discardingOversizedRecord {
                     if fragment.count > maximumRecordBytes - pendingRecord.count {
@@ -80,32 +100,73 @@ enum JSONLStreamingReader {
 
                 if let newline {
                     guard try finishRecord(terminated: true) else {
-                        return Result(items: nil, oversizedRecordCount: oversizedRecordCount)
+                        return Result(
+                            items: nil,
+                            state: state,
+                            oversizedRecordCount: oversizedRecordCount,
+                            parsedOffset: parsedOffset,
+                            endsAtLineBoundary: false
+                        )
                     }
+                    streamOffset += fragmentCount + 1
+                    parsedOffset = streamOffset
+                    endsAtLineBoundary = true
                     offset = chunk.index(after: newline)
                 } else {
+                    streamOffset += fragmentCount
+                    endsAtLineBoundary = fragmentCount == 0
+                        ? endsAtLineBoundary
+                        : false
                     offset = chunk.endIndex
                 }
             }
         }
 
         if !discardingOversizedRecord, !pendingRecord.isEmpty {
+            endsAtLineBoundary = false
             guard try finishRecord(terminated: false) else {
-                return Result(items: nil, oversizedRecordCount: oversizedRecordCount)
+                return Result(
+                    items: nil,
+                    state: state,
+                    oversizedRecordCount: oversizedRecordCount,
+                    parsedOffset: parsedOffset,
+                    endsAtLineBoundary: false
+                )
             }
         }
+        if discardingOversizedRecord {
+            endsAtLineBoundary = false
+        }
         guard try flushBatch() else {
-            return Result(items: nil, oversizedRecordCount: oversizedRecordCount)
+            return Result(
+                items: nil,
+                state: state,
+                oversizedRecordCount: oversizedRecordCount,
+                parsedOffset: parsedOffset,
+                endsAtLineBoundary: false
+            )
         }
 
         if !readAnyBytes {
             guard let parsed = parse(Data(), &state) else {
-                return Result(items: nil, oversizedRecordCount: oversizedRecordCount)
+                return Result(
+                    items: nil,
+                    state: state,
+                    oversizedRecordCount: oversizedRecordCount,
+                    parsedOffset: parsedOffset,
+                    endsAtLineBoundary: endsAtLineBoundary
+                )
             }
             items.append(contentsOf: parsed)
         }
 
-        return Result(items: items, oversizedRecordCount: oversizedRecordCount)
+        return Result(
+            items: items,
+            state: state,
+            oversizedRecordCount: oversizedRecordCount,
+            parsedOffset: parsedOffset,
+            endsAtLineBoundary: endsAtLineBoundary
+        )
     }
 }
 

@@ -10,6 +10,7 @@ struct ProcessEnvironmentReader: EnvironmentReading {
     var processEnvironment: [String: String] = ProcessInfo.processInfo.environment
     var shellEnvironment: LoginShellEnvironment = .shared
     var launchSnapshot: @Sendable () -> ShellEnvironmentSnapshot? = { ShellEnvironmentSnapshotStore.launchSnapshot }
+    var blocksOnShellCapture = true
 
     private static let identityKeys = Set(ShellEnvironmentSnapshot.capturedKeys)
 
@@ -32,7 +33,9 @@ struct ProcessEnvironmentReader: EnvironmentReading {
         if Self.identityKeys.contains(name), let snapshot = launchSnapshot() {
             return snapshot.values[name]?.nilIfEmpty
         }
-        return shellEnvironment.value(for: name)
+        return blocksOnShellCapture
+            ? shellEnvironment.value(for: name)
+            : shellEnvironment.cachedValue(for: name)
     }
 }
 

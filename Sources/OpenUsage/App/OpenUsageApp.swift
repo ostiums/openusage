@@ -2,6 +2,7 @@ import AppKit
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let processStartedAt = ProcessInfo.processInfo.systemUptime
     private var container: AppContainer?
     private var statusItemController: StatusItemController?
     /// Widget clicks can arrive before startup or the welcome screen has finished. Queue them until
@@ -131,6 +132,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         container.startRefreshing()
         let statusItemController = StatusItemController(container: container, updater: updater)
         self.statusItemController = statusItemController
+        let launchDurationMS = Int((ProcessInfo.processInfo.systemUptime - processStartedAt) * 1_000)
+        AppLog.info(.lifecycle, "launch to status item ready: \(launchDurationMS) ms")
         Self.openInitialDestination(
             pendingURLs: pendingOpenURLs,
             showsDashboard: showsDashboard,

@@ -26,9 +26,14 @@ Claude, Codex, and pi spend history has a separate local-log parse cache under
 `~/Library/Application Support/OpenUsage/log-scan-cache/`. It stores parsed usage events before OpenUsage
 applies model-rate estimates, so pricing updates take effect without re-reading unchanged JSONL. On
 relaunch, an entry is reused only when its path, size, modification time, and parser version still match.
-Same-home cards share parsed data, and changing one source file rewrites only that file's record. Old files
-leave the cache as the history window advances, and identities unused for 35 days are removed. App writes
-are debounced until after refresh; the one-shot CLI drains pending writes before it exits.
+When a supported JSONL file only grows, the scanner resumes from the last complete line and reads only
+the appended bytes. A changed prefix, truncated file, incomplete appended line, or unusable parser state
+falls back to a full streamed parse instead of dropping that record. Same-home cards share parsed data,
+and changing one source file rewrites only that file's record. Old files leave the cache as the history
+window advances, and identities unused for 35 days are removed. App writes are debounced until after
+refresh; the one-shot CLI drains pending writes before it exits.
+
+The append-only scanner is adapted from Runway (mstallone/runway, MIT).
 
 The macOS widget reads a separate display-only copy of these snapshots. OpenUsage updates that copy
 after snapshot, provider, layout, or display-setting changes; the widget never reads credentials or
