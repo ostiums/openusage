@@ -2,7 +2,7 @@
 
 ## When data updates
 
-- All enabled providers refresh together: once at launch, then every 5 minutes (a fixed cadence — there's no setting for it). Opening the popover does not start a second automatic pass. Providers fetch in parallel, so fast cards update without waiting for a slow one. The batch itself still finishes only after every provider returns; notifications, history sync, and the next five-minute wait begin after that point.
+- All enabled providers refresh together: once at launch, then every 5 minutes (a fixed cadence — there's no setting for it). Opening the popover does not start a second automatic pass. Providers fetch in parallel, so fast cards update without waiting for a slow one; close-together results are briefly grouped so a burst shows as one update and is saved once (adapted from Runway (mstallone/runway) #47, MIT). The batch itself still finishes only after every provider returns; notifications, history sync, and the next five-minute wait begin after that point.
 - Turning a provider on (yourself in Customize, or automatically by first-launch/new-provider detection) fetches it promptly instead of waiting out the interval — even when the change lands in the middle of a refresh that's already running.
 - The Dashboard and Settings footer shows `Next update in Nm`. **Clicking it (or pressing ⌘R while that footer is present)** refreshes immediately, skipping the cache.
 - The one-shot `openusage` command reuses this same persisted cache for five minutes, refreshes missing or stale entries without starting the app, and exits. `openusage --force` runs the same forced provider refresh as ⌘R regardless of cache age.
@@ -33,7 +33,8 @@ and changing one source file rewrites only that file's record. Old files leave t
 window advances, and identities unused for 35 days are removed. App writes are debounced until after
 refresh; the one-shot CLI drains pending writes before it exits.
 
-The append-only scanner is adapted from Runway (mstallone/runway, MIT).
+The append-only scanner is adapted from Runway (mstallone/runway, MIT). The Codex line scan checks
+event markers in one pass, also adapted from Runway #45.
 
 The macOS widget reads a separate display-only copy of these snapshots. OpenUsage updates that copy
 after snapshot, provider, layout, or display-setting changes; the widget never reads credentials or

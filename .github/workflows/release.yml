@@ -143,7 +143,8 @@ jobs:
           npm install -g @posthog/cli
           # Symbolication matches a crash report to its symbols by the binary's Mach-O UUID (carried in
           # the dSYM), so `--directory` is all that's required — no per-release flags to keep in sync.
-          posthog-cli dsym upload --directory dist/dSYMs
+          # A stable cut rebuilds its beta's code, so its UUIDs are already uploaded; skip those.
+          posthog-cli dsym upload --directory dist/dSYMs --skip-on-conflict
 
       - name: Publish DMG to GitHub Releases
         uses: softprops/action-gh-release@v3

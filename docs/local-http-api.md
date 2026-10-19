@@ -110,7 +110,7 @@ is still 0 because OpenCode reports whole percentages.
 | Claude | `session`, `weekly`, `sonnet`, `fable`, `extraUsage`, `rateLimitResets` |
 | Codex | `session`, `weekly`, `spark`, `sparkWeekly`, `credits`, `creditValue`, `rateLimitResets` |
 | Cursor | `totalUsage`, `grokBot`, `autoUsage`, `apiUsage`, `onDemand`, `requests`, `credits` |
-| Antigravity | `geminiSession`, `geminiWeekly`, `nonGeminiSession`, `nonGeminiWeekly` |
+| Antigravity | `geminiSession`, `geminiWeekly`, `argonWeekly`, `nonGeminiSession`, `nonGeminiWeekly` |
 | Copilot | `premiumCredits`, `extraUsage`, `orgCredits`, `orgSpend`, `chat`, `completions` |
 | Devin | `daily`, `weekly`, `extraUsageBalance` |
 | Grok | `weekly` |
@@ -121,6 +121,8 @@ is still 0 because OpenCode reports whole percentages.
 
 Charts, colors, subtitles, formatted badges, layout state, and historical spend periods stay out of this
 contract. Codex's combined Credits UI row becomes two scalar resources: `credits` and `creditValue`.
+Antigravity's `argonWeekly` reports the separate Gemini 4 Argon weekly quota when the account exposes
+it. It is omitted when unavailable, including on older endpoints and accounts without that quota.
 
 ## Legacy usage response shape
 

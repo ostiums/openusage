@@ -116,16 +116,24 @@ final class CursorProvider: ProviderRuntime {
         // The access token may have rotated during the usage fetch's refresh-and-retry; read the live one.
         let currentToken = authState.accessToken ?? accessToken
 
-        let (planName, planInfoUnavailable) = await fetchPlanName(accessToken: currentToken)
+        let (planInfoName, planInfoUnavailable) = await fetchPlanName(accessToken: currentToken)
+        let routingPlanName = CursorUsageMapper.routingPlanName(
+            planInfoName: planInfoName,
+            membershipType: authState.membershipType
+        )
+        let displayPlanName = CursorUsageMapper.resolvedPlanName(
+            planInfoName: planInfoName,
+            membershipType: authState.membershipType
+        )
         let fallback = CursorUsageMapper.shouldUseRequestBasedFallback(
             usage: usage,
-            planName: planName,
+            planName: routingPlanName,
             planInfoUnavailable: planInfoUnavailable
         )
         if fallback.shouldFallback {
             var mapped = try await usageSummaryAndRequestResult(
                 accessToken: currentToken,
-                planName: planName,
+                planName: displayPlanName ?? routingPlanName,
                 unavailableMessage: fallback.message
             )
             await appendGrokBotUsage(to: &mapped.lines, accessToken: currentToken)
@@ -137,7 +145,7 @@ final class CursorProvider: ProviderRuntime {
             do {
                 var mapped = try await requestBasedResult(
                     accessToken: currentToken,
-                    planName: planName,
+                    planName: displayPlanName ?? routingPlanName,
                     unavailableMessage: "Cursor request-based usage data unavailable. Try again later."
                 )
                 await appendGrokBotUsage(to: &mapped.lines, accessToken: currentToken)
@@ -151,13 +159,65 @@ final class CursorProvider: ProviderRuntime {
         let stripeBalanceCents = await fetchStripeBalanceCents(accessToken: currentToken)
         var mapped = try CursorUsageMapper.mapUsage(
             usage: usage,
-            planName: planName,
+            planName: planInfoName,
             creditGrants: creditGrants,
             stripeBalanceCents: stripeBalanceCents
+        )
+        mapped.plan = CursorUsageMapper.resolvedPlanLabel(
+            planInfoName: planInfoName,
+            membershipType: authState.membershipType
+        )
+        await enrichPrimaryUsageFromSummaryIfNeeded(
+            accessToken: currentToken,
+            usage: usage,
+            planInfoName: planInfoName,
+            membershipType: authState.membershipType,
+            mapped: &mapped
         )
         await appendGrokBotUsage(to: &mapped.lines, accessToken: currentToken)
         let history = await appendSpendLines(to: &mapped.lines, accessToken: currentToken)
         return snapshot(mapped, usageHistory: history)
+    }
+
+    /// Model-pool Enterprise/team seats often keep a usable primary usage payload but omit on-demand
+    /// there. usage-summary still carries Extra Usage for those accounts.
+    private func enrichPrimaryUsageFromSummaryIfNeeded(
+        accessToken: String,
+        usage: [String: Any],
+        planInfoName: String?,
+        membershipType: String?,
+        mapped: inout CursorMappedUsage
+    ) async {
+        let needsOnDemand = !mapped.lines.contains(where: { $0.label == "On-demand" })
+        let facts = CursorPlanUsageFacts(usage: usage)
+        let localIsOrg = membershipType.map { CursorUsageMapper.orgMembershipTypes.contains($0) } ?? false
+        // Only org / team-shaped seats: personal Pro model pools must not trigger usage-summary.
+        guard localIsOrg || facts.isTeamByShape else { return }
+        // Local org already fixed the badge; skip the extra call when Extra Usage is present.
+        if localIsOrg, !needsOnDemand { return }
+
+        guard let summary = await fetchOptionalJSONObject(label: "usage-summary", request: {
+            try await self.usageClient.fetchUsageSummary(accessToken: accessToken)
+        }) else {
+            return
+        }
+        if !CursorUsageSummaryMapper.hasUsableSummaryPayload(summary) {
+            AppLog.warn(LogTag.plugin("cursor"), "optional usage-summary response contained no usable usage fields")
+            return
+        }
+        if needsOnDemand {
+            CursorUsageSummaryMapper.appendMissingOnDemand(from: summary, to: &mapped.lines)
+        }
+        let summaryMembership = (summary["membershipType"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        mapped.plan = CursorUsageMapper.resolvedPlanLabel(
+            planInfoName: planInfoName,
+            membershipType: CursorUsageMapper.preferredMembership(
+                local: membershipType,
+                summary: summaryMembership
+            )
+        ) ?? mapped.plan
     }
 
     /// Grok Bot uses the same Cursor account but keeps a separate weekly allowance. Missing access is
@@ -302,8 +362,12 @@ final class CursorProvider: ProviderRuntime {
         }) else {
             return nil
         }
+        // Enterprise seats often return a body without grant fields. That is not a schema error —
+        // only warn when Cursor claimed grants but the payload cannot be read.
         guard let hasCreditGrants = body["hasCreditGrants"] as? Bool else {
-            AppLog.warn(LogTag.plugin("cursor"), "optional credit-grants response contained invalid grant metadata")
+            if body["hasCreditGrants"] != nil {
+                AppLog.warn(LogTag.plugin("cursor"), "optional credit-grants response contained invalid grant metadata")
+            }
             return nil
         }
         if hasCreditGrants {

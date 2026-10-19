@@ -1,5 +1,79 @@
 # Changelog
 
+## v0.7.16-beta.1
+
+### New Features
+- Add Antigravity Argon quota and pricing ([#1395](https://github.com/robinebers/openusage/pull/1395)) by @validatedev
+
+### Bug Fixes
+- Move dashboard caret below expanded metrics ([#1382](https://github.com/robinebers/openusage/pull/1382)) by @robinebers
+- Read only the new lines of growing Claude and Codex logs ([#1383](https://github.com/robinebers/openusage/pull/1383)) by @robinebers
+- Find Claude and Codex accounts off the main thread at launch ([#1384](https://github.com/robinebers/openusage/pull/1384)) by @robinebers
+- Check each Codex log line for event markers in one pass ([#1390](https://github.com/robinebers/openusage/pull/1390)) by @robinebers
+- fix(antigravity): restore Gemini meters and plan badge from Cloud Code ([#1407](https://github.com/robinebers/openusage/pull/1407)) by @validatedev
+- fix(cursor): Enterprise badge + Extra Usage from usage-summary ([#1409](https://github.com/robinebers/openusage/pull/1409)) by @dariocurr
+- Coalesce refresh-end work (Runway #47, MIT) ([#1391](https://github.com/robinebers/openusage/pull/1391)) by @robinebers
+- Claim Claude usage-limit resets from the resets popover ([#1413](https://github.com/robinebers/openusage/pull/1413)) by @robinebers
+
+### Chores
+- chore(deps): bump github.com/posthog/posthog-ios from 3.90.2 to 3.92.0 ([#1406](https://github.com/robinebers/openusage/pull/1406)) by @app/dependabot
+- docs: changelog for v0.7.15 by @robinebers
+
+---
+
+### Changelog
+**Full Changelog**: [v0.7.15...v0.7.16-beta.1](https://github.com/robinebers/openusage/compare/v0.7.15...v0.7.16-beta.1)
+
+- [05c7a87](https://github.com/robinebers/openusage/commit/05c7a87805d7f0d76cb5048fbe4c4caa4d2de784) Move dashboard caret below expanded metrics (#1382) by @robinebers
+- [5c9d9a7](https://github.com/robinebers/openusage/commit/5c9d9a7724933b58bf14c094d59a530af315b017) Read only the new lines of growing Claude and Codex logs (#1383) by @robinebers
+- [bae20d9](https://github.com/robinebers/openusage/commit/bae20d9ca7eb5aaab93cdae2673846d24ee5e8d2) Find Claude and Codex accounts off the main thread at launch (#1384) by @robinebers
+- [063eb06](https://github.com/robinebers/openusage/commit/063eb0661ca810905e3f981aaaaff95a7df2e66e) Add Antigravity Argon quota and pricing (#1395) by @validatedev
+- [3a2c9bb](https://github.com/robinebers/openusage/commit/3a2c9bb08a46590505362fded31116de0ae2e710) chore(deps): bump github.com/posthog/posthog-ios from 3.90.2 to 3.92.0 (#1406) by @app/dependabot
+- [f0039b2](https://github.com/robinebers/openusage/commit/f0039b270d1f4a3b5152fe3253fca53ac304240f) Check each Codex log line for event markers in one pass (#1390) by @robinebers
+- [9e6d362](https://github.com/robinebers/openusage/commit/9e6d36235263e3b06087be7cafc35395ebd8f5ba) fix(antigravity): restore Gemini meters and plan badge from Cloud Code (#1407) by @validatedev
+- [eab20cf](https://github.com/robinebers/openusage/commit/eab20cfda184b2743c9c9e3ad561abad92abb4f0) fix(cursor): Enterprise badge + Extra Usage from usage-summary (#1409) by @dariocurr
+- [bfb0fbb](https://github.com/robinebers/openusage/commit/bfb0fbbf2acad3d0ae2b3d36f2266f35debddb7c) Coalesce refresh-end work (Runway #47, MIT) (#1391) by @robinebers
+- [a7953bf](https://github.com/robinebers/openusage/commit/a7953bf71ff0cd68680b2c553be5a6d7beb80c09) Claim Claude usage-limit resets from the resets popover (#1413) by @robinebers
+- [a9b2625](https://github.com/robinebers/openusage/commit/a9b26251d49d31e6663ab6ac351bffde2a37e7fc) docs: changelog for v0.7.15 by @robinebers
+
+## v0.7.15
+
+### New Features
+- Add a first-launch welcome screen that asks only after you pick providers ([#1380](https://github.com/robinebers/openusage/pull/1380)) by @robinebers
+
+### Bug Fixes
+- fix(codex): point the Dashboard link at chatgpt.com/settings/usage ([#1364](https://github.com/robinebers/openusage/pull/1364)) by @robinebers
+- fix(cursor): fetch spend history day by day and keep finished days per account ([#1373](https://github.com/robinebers/openusage/pull/1373)) by @robinebers
+- fix(pricing): accept -n shorthand for Gemini none effort variant ([#1371](https://github.com/robinebers/openusage/pull/1371)) by @validatedev
+- fix(ollama): read credits and limits from /api/balance ([#1368](https://github.com/robinebers/openusage/pull/1368)) by @robinebers
+- fix(opencode): keep reading auth.json on OpenCode 1 databases ([#1365](https://github.com/robinebers/openusage/pull/1365)) by @robinebers
+- fix(codex): make auto-review free from October 6 ([#1354](https://github.com/robinebers/openusage/pull/1354)) by @validatedev
+- fix(claude): check reset grants hourly instead of on every refresh ([#1367](https://github.com/robinebers/openusage/pull/1367)) by @robinebers
+- Fix persistent Keychain authorization prompts ([#1372](https://github.com/robinebers/openusage/pull/1372)) by @robinebers
+- fix(keychain): stop repeat Keychain popups and keep Always Allow ([#1379](https://github.com/robinebers/openusage/pull/1379)) by @robinebers
+
+### Chores
+- chore(deps): bump github.com/posthog/posthog-ios from 3.85.3 to 3.90.2 ([#1374](https://github.com/robinebers/openusage/pull/1374)) by @app/dependabot
+- docs: changelog for v0.7.15-beta.1 by @robinebers
+
+---
+
+### Changelog
+**Full Changelog**: [v0.7.14...v0.7.15](https://github.com/robinebers/openusage/compare/v0.7.14...v0.7.15)
+
+- [1c37176](https://github.com/robinebers/openusage/commit/1c37176762ff343810061af6fb965e6d9bf56659) fix(codex): point the Dashboard link at chatgpt.com/settings/usage (#1364) by @robinebers
+- [dc877ff](https://github.com/robinebers/openusage/commit/dc877fff18c95398121268a23b2447f7352eff04) chore(deps): bump github.com/posthog/posthog-ios from 3.85.3 to 3.90.2 (#1374) by @app/dependabot
+- [93e5897](https://github.com/robinebers/openusage/commit/93e5897bb0c1e3149ad4a3d4d999efbd743dff8c) fix(cursor): fetch spend history day by day and keep finished days per account (#1373) by @robinebers
+- [2fd740a](https://github.com/robinebers/openusage/commit/2fd740a79ec3cc5878975f790c8772c776b81d5d) fix(pricing): accept -n shorthand for Gemini none effort variant (#1371) by @validatedev
+- [677d886](https://github.com/robinebers/openusage/commit/677d886eb7482697db942422f01987ba0d8a8ded) fix(ollama): read credits and limits from /api/balance (#1368) by @robinebers
+- [34474ec](https://github.com/robinebers/openusage/commit/34474ec1eb90c31bdc0645cb0d8aad585f568daa) fix(opencode): keep reading auth.json on OpenCode 1 databases (#1365) by @robinebers
+- [b5a6e56](https://github.com/robinebers/openusage/commit/b5a6e56e5fd5c61360807227c2ea071a6ab2534a) fix(codex): make auto-review free from October 6 (#1354) by @validatedev
+- [60a379b](https://github.com/robinebers/openusage/commit/60a379b9546c05a9055930baf819c61324132274) fix(claude): check reset grants hourly instead of on every refresh (#1367) by @robinebers
+- [bb7de17](https://github.com/robinebers/openusage/commit/bb7de176def23a99bbdcaabe1ac7269f18c738be) Fix persistent Keychain authorization prompts (#1372) by @robinebers
+- [e87490a](https://github.com/robinebers/openusage/commit/e87490a8c483bb0ff397773936852d23e359a5fd) fix(keychain): stop repeat Keychain popups and keep Always Allow (#1379) by @robinebers
+- [5163dad](https://github.com/robinebers/openusage/commit/5163dad0c07d2982a2f9e808105ea6fb763c2c86) Add a first-launch welcome screen that asks only after you pick providers (#1380) by @robinebers
+- [66aada2](https://github.com/robinebers/openusage/commit/66aada23bfbac5c5988617fdd6a0f8edbe106764) docs: changelog for v0.7.15-beta.1 by @robinebers
+
 ## v0.7.15-beta.1
 
 ### New Features

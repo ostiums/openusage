@@ -8,6 +8,8 @@ struct CursorAuthState: Hashable, Sendable {
 
     var accessToken: String?
     var refreshToken: String?
+    /// Lowercased `cursorAuth/stripeMembershipType` from the Cursor state DB when present.
+    var membershipType: String?
     var source: Source
 }
 
@@ -69,9 +71,12 @@ struct CursorAuthStore: Sendable {
             let keychainSubject = Self.tokenSubject(keychainAccessToken)
             let subjectsDiffer = sqliteSubject != nil && keychainSubject != nil && sqliteSubject != keychainSubject
             if hasKeychainAuth, sqliteMembershipType == "free", subjectsDiffer {
+                // SQLite looks like a free account for a different subject; do not carry that
+                // membership onto the keychain session.
                 return CursorAuthState(
                     accessToken: keychainAccessToken,
                     refreshToken: keychainRefreshToken,
+                    membershipType: nil,
                     source: .keychain
                 )
             }
@@ -79,14 +84,18 @@ struct CursorAuthStore: Sendable {
             return CursorAuthState(
                 accessToken: sqliteAccessToken,
                 refreshToken: sqliteRefreshToken,
+                membershipType: sqliteMembershipType,
                 source: .sqlite
             )
         }
 
         if hasKeychainAuth {
+            // Keychain-only auth has no proven link to the state-DB membership row; leave it unset
+            // rather than attaching another account's stripeMembershipType.
             return CursorAuthState(
                 accessToken: keychainAccessToken,
                 refreshToken: keychainRefreshToken,
+                membershipType: nil,
                 source: .keychain
             )
         }

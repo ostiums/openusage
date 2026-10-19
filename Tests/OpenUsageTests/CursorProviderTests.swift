@@ -21,6 +21,20 @@ final class CursorAuthStoreTests: XCTestCase {
         XCTAssertEqual(state?.source, .keychain)
         XCTAssertEqual(state?.accessToken, keychainToken)
         XCTAssertEqual(state?.refreshToken, "keychain-refresh")
+        XCTAssertNil(state?.membershipType)
+    }
+
+    func testLoadsEnterpriseMembershipTypeFromSQLite() {
+        let token = makeCursorJWT(sub: "google-oauth2|enterprise-user")
+        let store = CursorAuthStore(
+            sqlite: KeyValueSQLite(values: [
+                CursorAuthStore.accessTokenKey: token,
+                CursorAuthStore.membershipTypeKey: "Enterprise"
+            ]),
+            keychain: FakeKeychain()
+        )
+
+        XCTAssertEqual(store.loadAuthState()?.membershipType, "enterprise")
     }
 
     func testPersistsSQLiteAccessToken() throws {
@@ -74,6 +88,84 @@ final class CursorUsageMapperTests: XCTestCase {
         XCTAssertNil(CursorUsageMapper.mapGrokBotUsage(["usagePercent": true]))
         XCTAssertNil(CursorUsageMapper.mapGrokBotUsage(["usagePercent": -1]))
         XCTAssertNil(CursorUsageMapper.mapGrokBotUsage(["hasNonZeroIncludedLimit": true]))
+    }
+
+    func testResolvedPlanNamePrefersEnterpriseMembershipOverProPlanInfo() {
+        XCTAssertEqual(
+            CursorUsageMapper.resolvedPlanLabel(planInfoName: "Pro", membershipType: "enterprise"),
+            "Enterprise"
+        )
+        XCTAssertEqual(
+            CursorUsageMapper.resolvedPlanLabel(planInfoName: "pro plan", membershipType: "team"),
+            "Team"
+        )
+        XCTAssertEqual(
+            CursorUsageMapper.resolvedPlanLabel(planInfoName: "Ultra", membershipType: "pro"),
+            "Ultra"
+        )
+        XCTAssertEqual(
+            CursorUsageMapper.resolvedPlanLabel(planInfoName: nil, membershipType: "enterprise"),
+            "Enterprise"
+        )
+        XCTAssertEqual(
+            CursorUsageMapper.routingPlanName(planInfoName: nil, membershipType: "pro"),
+            nil
+        )
+        XCTAssertEqual(
+            CursorUsageMapper.routingPlanName(planInfoName: nil, membershipType: "enterprise"),
+            "enterprise"
+        )
+        XCTAssertEqual(
+            CursorUsageMapper.preferredMembership(local: "pro", summary: "enterprise"),
+            "enterprise"
+        )
+        XCTAssertEqual(
+            CursorUsageMapper.preferredMembership(local: "enterprise", summary: "team"),
+            "enterprise"
+        )
+    }
+
+    func testOrgMembershipPreservesExplicitNonProPlanNames() {
+        for plan in ["Ultra", "Business", "Enterprise", "Pro Plus"] {
+            XCTAssertEqual(
+                CursorUsageMapper.resolvedPlanLabel(planInfoName: plan, membershipType: "team"),
+                plan
+            )
+        }
+        for plan: String? in [nil, "", "  ", "Pro", " pro plan "] {
+            XCTAssertEqual(
+                CursorUsageMapper.resolvedPlanLabel(planInfoName: plan, membershipType: "enterprise"),
+                "Enterprise"
+            )
+        }
+    }
+
+    func testOrgRoutingKeepsUsableTotalPercentWithoutLimitOrPools() throws {
+        let usage: [String: Any] = [
+            "enabled": true,
+            "planUsage": ["totalPercentUsed": 20]
+        ]
+        XCTAssertTrue(CursorPlanUsageFacts(usage: usage).planUsageUnusable)
+        for membership in ["team", "enterprise"] {
+            let route = CursorUsageMapper.routingPlanName(planInfoName: "Pro", membershipType: membership)
+            XCTAssertFalse(CursorUsageMapper.shouldUseRequestBasedFallback(
+                usage: usage, planName: route, planInfoUnavailable: false
+            ).shouldFallback)
+        }
+        // GetPlanInfo Team with percent-only planUsage must stay on primary without throwing.
+        XCTAssertFalse(CursorUsageMapper.shouldUseRequestBasedFallback(
+            usage: usage, planName: "Team", planInfoUnavailable: false
+        ).shouldFallback)
+        let mapped = try CursorUsageMapper.mapUsage(
+            usage: usage, planName: "Team", creditGrants: nil, stripeBalanceCents: 0
+        )
+        guard case .progress(_, let used, let limit, let format, _, _, _) =
+            mapped.lines.first(where: { $0.label == "Total usage" }) else {
+            return XCTFail("Missing percent total for Team percent-only payload")
+        }
+        XCTAssertEqual(used, 20)
+        XCTAssertEqual(limit, 100)
+        XCTAssertEqual(format, .percent)
     }
 
     func testMapsCreditsUsageBreakdownAndOnDemand() throws {
@@ -281,6 +373,56 @@ final class CursorProviderTests: XCTestCase {
         XCTAssertEqual(otherModels.title, "Other Models")
         XCTAssertEqual(otherModels.metricLabel, "Other Models")
         XCTAssertEqual(otherModels.limitResources.map(\.key), ["apiUsage"])
+    }
+
+    func testProTeamMembershipChangesBadgeWithoutChangingPrimaryTotal() async throws {
+        let accessToken = makeCursorJWT(sub: "google-oauth2|team-seat")
+        for planUsage: [String: Any] in [
+            ["limit": 2000, "totalSpend": 400, "totalPercentUsed": 20],
+            ["totalPercentUsed": 20],
+            ["totalPercentUsed": 20, "autoPercentUsed": 10, "apiPercentUsed": 30],
+            ["limit": 2000, "totalSpend": 400, "autoPercentUsed": 10, "apiPercentUsed": 30]
+        ] {
+            let body = try JSONSerialization.data(withJSONObject: ["enabled": true, "planUsage": planUsage])
+            let http = RoutingHTTPClient { request in
+                switch request.url {
+                case CursorUsageClient.usageURL:
+                    return HTTPResponse(statusCode: 200, headers: [:], body: body)
+                case CursorUsageClient.planURL:
+                    return HTTPResponse(statusCode: 200, headers: [:], body: Data(#"{"planInfo":{"planName":" Pro "}}"#.utf8))
+                default:
+                    return HTTPResponse(statusCode: 404, headers: [:], body: Data())
+                }
+            }
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cursor-pro-team-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let provider = CursorProvider(
+                authStore: CursorAuthStore(
+                    sqlite: KeyValueSQLite(values: [
+                        CursorAuthStore.accessTokenKey: accessToken,
+                        CursorAuthStore.membershipTypeKey: "team"
+                    ]),
+                    keychain: FakeKeychain()
+                ),
+                usageClient: CursorUsageClient(http: http),
+                now: { Date(timeIntervalSince1970: 1_800_000_000) },
+                pricing: { TestPricing.bundled },
+                usageHistoryStore: CursorUsageHistoryStore(directory: directory)
+            )
+
+            let snapshot = await provider.refresh()
+
+            XCTAssertNil(snapshot.errorCategory)
+            XCTAssertEqual(snapshot.plan, "Team")
+            guard case .progress(_, let used, let limit, let format, _, _, _) =
+                snapshot.lines.first(where: { $0.label == "Total usage" }) else {
+                return XCTFail("Missing percent total for Pro team seat")
+            }
+            XCTAssertEqual(used, 20)
+            XCTAssertEqual(limit, 100)
+            XCTAssertEqual(format, .percent)
+        }
     }
 
     func testRefreshFetchesLiveCursorUsage() async {

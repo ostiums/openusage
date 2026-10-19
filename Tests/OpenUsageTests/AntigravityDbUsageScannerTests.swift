@@ -149,6 +149,65 @@ final class AntigravityDbUsageScannerTests: XCTestCase {
         XCTAssertEqual(scan.series.daily.first?.totalTokens, rowCount * 15)
     }
 
+    func testArgonPricingRefreshRestoresCachedHistorySpendAndTrend() async throws {
+        let fixture = try makeDatabaseDirectory()
+        let timestamp = UInt64(now.timeIntervalSince1970)
+        let sqlite = AntigravityFakeSQLite(rowsByPath: [fixture.paths[0]: [
+            .init(index: 0, blob: antigravityGenerationBlob(
+                model: "gemini-4-argon-trial", input: 1_000_000, output: 500_000,
+                cacheRead: 200_000, systemPrompt: 100_000, timestamp: timestamp
+            )),
+            .init(index: 1, blob: antigravityGenerationBlob(
+                model: "gemini-4-argon-high", input: 100_000, output: 0, timestamp: timestamp
+            ))
+        ]])
+        let scanner = AntigravityDbUsageScanner(sqlite: sqlite, conversationsDirectories: { [fixture.url.path] })
+
+        let unpricedResult = await scanner.scan(now: now, pricing: .empty)
+        let unpriced = try XCTUnwrap(unpricedResult)
+        XCTAssertTrue(unpriced.series.daily.isEmpty)
+        XCTAssertEqual(
+            Set(unpriced.unknownModelsByDay.values.flatMap { $0 }),
+            ["gemini-4-argon-trial", "gemini-4-argon-high"]
+        )
+
+        let supplementOnly = ModelPricing(
+            supplement: TestPricing.bundled.supplement,
+            primary: PricingCatalog(), secondary: PricingCatalog()
+        )
+        let repricedResult = await scanner.scan(now: now, pricing: supplementOnly)
+        let scan = try XCTUnwrap(repricedResult)
+
+        XCTAssertEqual(sqlite.queriedCursors, [-1], "Pricing refresh reuses the unchanged database's decoded events")
+        XCTAssertTrue(scan.unknownModelsByDay.isEmpty)
+        XCTAssertEqual(scan.series.daily.count, 1)
+        XCTAssertEqual(scan.series.daily.first?.totalTokens, 1_900_000)
+        // $2.40 input (including the system prompt) + $0.02 cache reads + $5 output.
+        XCTAssertEqual(try XCTUnwrap(scan.series.daily.first?.costUSD), 7.42, accuracy: 0.000_001)
+        let models = try XCTUnwrap(scan.modelUsage?.daily.first?.models)
+        XCTAssertEqual(models.map(\.model), ["gemini-4-argon"])
+        XCTAssertEqual(models.first?.totalTokens, 1_900_000)
+        XCTAssertEqual(try XCTUnwrap(models.first?.costUSD), 7.42, accuracy: 0.000_001)
+
+        var lines: [MetricLine] = []
+        SpendTileMapper.appendTokenUsage(
+            scan.series, to: &lines, now: now,
+            unknownModelsByDay: scan.unknownModelsByDay, modelUsage: scan.modelUsage
+        )
+        SpendTileMapper.appendUsageTrend(scan.series, to: &lines, now: now, note: "From Antigravity conversations")
+        guard case .values(_, let values, _, _, let unknownModels, _) = lines.first(where: { $0.label == "Today" }),
+              case .chart(_, let points, _) = lines.first(where: { $0.label == "Usage Trend" }) else {
+            return XCTFail("Argon history should back both Today's spend and the Usage Trend")
+        }
+        let spend = try XCTUnwrap(values.first(where: { $0.kind == .dollars }))
+        XCTAssertEqual(spend.number, 7.42, accuracy: 0.000_001)
+        XCTAssertTrue(spend.estimated)
+        XCTAssertEqual(values.first(where: { $0.kind == .count }),
+                       MetricValue(number: 1_900_000, kind: .count, label: "tokens"))
+        XCTAssertTrue(unknownModels.isEmpty)
+        XCTAssertEqual(points.last?.value, 1_900_000)
+    }
+
     func testReusesHistoryAndReadsOnlyRowsAddedToDatabaseOrWAL() async throws {
         let fixture = try makeDatabaseDirectory()
         let timestamp = UInt64(now.timeIntervalSince1970) - 3_600

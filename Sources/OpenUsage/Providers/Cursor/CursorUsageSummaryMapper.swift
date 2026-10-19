@@ -51,8 +51,15 @@ enum CursorUsageSummaryMapper {
             throw CursorUsageError.requestBasedUnavailable(unavailableMessage)
         }
 
+        let summaryMembership = summary?["membershipType"] as? String
         return CursorMappedUsage(
-            plan: planLabel(planName) ?? planLabel(summary?["membershipType"] as? String),
+            plan: CursorUsageMapper.resolvedPlanLabel(
+                planInfoName: planName,
+                membershipType: CursorUsageMapper.preferredMembership(
+                    local: nil,
+                    summary: summaryMembership
+                )
+            ) ?? planLabel(planName) ?? planLabel(summaryMembership),
             lines: lines
         )
     }
@@ -157,6 +164,13 @@ enum CursorUsageSummaryMapper {
             return
         }
         _ = appendOnDemandBucket(team?["onDemand"], cycle: cycle, to: &lines)
+    }
+
+    /// Primary `GetCurrentPeriodUsage` mapping can populate model pools while omitting on-demand.
+    /// Merge Extra Usage from usage-summary without replacing the live pool meters.
+    static func appendMissingOnDemand(from summary: [String: Any], to lines: inout [MetricLine]) {
+        guard !lines.contains(where: { $0.label == "On-demand" }) else { return }
+        appendOnDemand(summary, cycle: billingCycle(summary: summary, requestUsage: nil), to: &lines)
     }
 
     /// Returns whether a usable row was emitted. An Enterprise response can include an individual
